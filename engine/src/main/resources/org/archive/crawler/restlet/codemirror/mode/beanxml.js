@@ -47,6 +47,43 @@ CodeMirror.defineExtension("javadoc", function(cm) {
     return docUrl;
 });
 
+CodeMirror.defineExtension("jumpToDefinition", function() {
+    var state = cm.getTokenAt(cm.getCursor()).state.xmlState;
+    for (var ctx = state.context; ctx; ctx = ctx.prev) {
+	if (ctx.tagName == "ref" && ctx.attributes) {
+	    return this.jumpToBean(ctx.attributes["bean"]);
+	}
+    }
+});
+
+CodeMirror.defineExtension("jumpToBean", function(beanId) {
+    var cursor = this.getSearchCursor(new RegExp("<bean[^>]*id=[\"']" + beanId + "[\"']"));
+    if (!cursor.find()) {
+	// fallback to a broader search since searchcursor.js doesn't support multiline regexs
+	cursor = this.getSearchCursor(new RegExp("id=[\"']" + beanId + "[\"']"));
+	if (!cursor.find()) {
+	    return false;
+	}
+    }
+
+    if (!this._jumpStack) {
+	this._jumpStack = [];
+    }
+    this._jumpStack.push(cm.getCursor());
+
+    this.setCursor({line: this.lineCount() - 1});
+    this.setCursor(cursor.from());
+    this.focus();
+    return true;
+});
+
+CodeMirror.defineExtension("jumpBack", function(beanId) {
+    var pos = this._jumpStack.pop();
+    if (pos) {
+	this.setCursor(pos);
+    }
+});
+
 CodeMirror.defineMode("beanxml", function(config, parserConfig) {
   var xmlMode = CodeMirror.getMode(config, "xmlpure");
 

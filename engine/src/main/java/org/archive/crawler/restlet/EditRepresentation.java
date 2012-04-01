@@ -100,7 +100,10 @@ public class EditRepresentation extends CharacterRepresentation {
         pw.println("var cmopts = {");
         pw.println("    mode: {name: 'beanxml'},");
         pw.println("    indentUnit: 1, lineNumbers: true, autofocus: true,");
-        pw.println("    extraKeys: {'F1': function(cm) { window.open(cm.javadoc(cm), '_blank'); }},");
+        pw.println("    extraKeys: {    'F1': function(cm) { window.open(cm.javadoc(cm), '_blank'); },");
+        pw.println("                    'F3': function(cm) { cm.jumpToDefinition(); },");
+        pw.println("                'Ctrl-.': function(cm) { cm.jumpToDefinition(); },");
+        pw.println("                'Ctrl-,': function(cm) { cm.jumpBack(); }}");
         pw.println("    onChange: function() { savebutton.disabled = false; },");
         pw.println("}");
         pw.println("var cm = CodeMirror.fromTextArea(editor, cmopts);");

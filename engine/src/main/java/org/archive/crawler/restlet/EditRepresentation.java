@@ -73,6 +73,7 @@ public class EditRepresentation extends CharacterRepresentation {
         pw.println("<link rel='stylesheet' href='" + getStaticRef("codemirror/util/dialog.css") + "'>");
         pw.println("<script src='" + getStaticRef("codemirror/codemirror.js") + "'></script>");
         pw.println("<script src='" + getStaticRef("codemirror/mode/xmlpure.js") + "'></script>");
+        pw.println("<script src='" + getStaticRef("codemirror/mode/beanxml.js") + "'></script>");
         pw.println("<script src='" + getStaticRef("codemirror/util/dialog.js") + "'></script>");
         pw.println("<script src='" + getStaticRef("codemirror/util/searchcursor.js") + "'></script>");
         pw.println("<script src='" + getStaticRef("codemirror/util/search.js") + "'></script>");
@@ -97,8 +98,9 @@ public class EditRepresentation extends CharacterRepresentation {
         pw.println("var savebar = document.getElementById('savebar');");
         pw.println("var savebutton = document.getElementById('savebutton');");
         pw.println("var cmopts = {");
-        pw.println("    mode: {name: 'xmlpure'},");
+        pw.println("    mode: {name: 'beanxml'},");
         pw.println("    indentUnit: 1, lineNumbers: true, autofocus: true,");
+        pw.println("    extraKeys: {'F1': function(cm) { window.open(cm.javadoc(cm), '_blank'); }},");
         pw.println("    onChange: function() { savebutton.disabled = false; },");
         pw.println("}");
         pw.println("var cm = CodeMirror.fromTextArea(editor, cmopts);");

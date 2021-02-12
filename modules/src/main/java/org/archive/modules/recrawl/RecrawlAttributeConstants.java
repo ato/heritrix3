@@ -55,6 +55,8 @@ public interface RecrawlAttributeConstants {
     public static final String A_WARC_RECORD_ID = "warc-record-id";
     /** warc filename containing the content payload */
     public static final String A_WARC_FILENAME = "warc-filename";
+    /** path to warc file of warc record with content payload */
+    public static final String A_WARC_FILE_PATH = "warc-file-path";
     /** offset into warc file of warc record with content payload */
     public static final String A_WARC_FILE_OFFSET = "warc-file-offset";
     /** date content payload was written */

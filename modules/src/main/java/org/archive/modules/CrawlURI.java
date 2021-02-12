@@ -1793,25 +1793,28 @@ implements Reporter, Serializable, OverlayContext, Comparable<CrawlURI> {
      * @since 3.3.0
      */
     public String getHttpResponseHeader(String key) {
-        @SuppressWarnings("unchecked")
-        Map<String, String> httpResponseHeaders = (Map<String, String>) getData().get(A_HTTP_RESPONSE_HEADERS);
+        Map<String, String> httpResponseHeaders = getHttpResponseHeaders();
         if (httpResponseHeaders == null) {
             return null;
         }
         return httpResponseHeaders.get(key.toLowerCase());
     }
-
+    
     /**
      * @since 3.3.0
      */
     public void putHttpResponseHeader(String key, String value) {
-        @SuppressWarnings("unchecked")
-        Map<String, String> httpResponseHeaders = (Map<String, String>) getData().get(A_HTTP_RESPONSE_HEADERS);
+        Map<String, String> httpResponseHeaders = getHttpResponseHeaders();
         if (httpResponseHeaders == null) {
             httpResponseHeaders = new HashMap<String, String>();
             getData().put(A_HTTP_RESPONSE_HEADERS, httpResponseHeaders);
         }
         httpResponseHeaders.put(key.toLowerCase(), value);
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, String> getHttpResponseHeaders() {
+        return (Map<String, String>) getData().get(A_HTTP_RESPONSE_HEADERS);
     }
 
     @SuppressWarnings("unchecked")

@@ -1,13 +1,7 @@
 package org.archive.modules.writer;
 
 import static org.archive.modules.CoreAttributeConstants.A_WARC_STATS;
-import static org.archive.modules.recrawl.RecrawlAttributeConstants.A_CONTENT_DIGEST_COUNT;
-import static org.archive.modules.recrawl.RecrawlAttributeConstants.A_ORIGINAL_DATE;
-import static org.archive.modules.recrawl.RecrawlAttributeConstants.A_ORIGINAL_URL;
-import static org.archive.modules.recrawl.RecrawlAttributeConstants.A_WARC_FILENAME;
-import static org.archive.modules.recrawl.RecrawlAttributeConstants.A_WARC_FILE_OFFSET;
-import static org.archive.modules.recrawl.RecrawlAttributeConstants.A_WARC_RECORD_ID;
-import static org.archive.modules.recrawl.RecrawlAttributeConstants.A_WRITE_TAG;
+import static org.archive.modules.recrawl.RecrawlAttributeConstants.*;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -222,6 +216,16 @@ abstract public class BaseWARCWriterProcessor extends WriterPoolProcessor
         Map<String,Object>[] history = curi.getFetchHistory();
         if (history != null && history[0] != null) {
             history[0].put(A_WRITE_TAG, writer.getFilenameWithoutOccupiedSuffix());
+
+            // save the path and offset of the resource record so ExtractorChromium can replay it
+            for (WARCRecordInfo warcRecord: writer.getTmpRecordLog()) {
+                if ((warcRecord.getType() == WARCRecordType.response
+                        || warcRecord.getType() == WARCRecordType.resource)) {
+                    history[0].put(A_WARC_FILE_PATH, writer.getFile().toString());
+                    history[0].put(A_WARC_FILE_OFFSET, startPosition);
+                    break;
+                }
+            }
         }
         
         // history for uri-agnostic, content digest based dedupe

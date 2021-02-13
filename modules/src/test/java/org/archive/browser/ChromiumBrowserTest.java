@@ -16,7 +16,7 @@ public class ChromiumBrowserTest extends TestCase {
                 System.out.println(request.url());
                 Map<String,String> headers = new HashMap<>();
                 headers.put("Content-Type", "text/html");
-                request.fulfill(200, "", headers.entrySet(), "<img src=hello.jpg>".getBytes(StandardCharsets.UTF_8));
+                request.fulfill(200, "", headers, "<img src=hello.jpg>".getBytes(StandardCharsets.UTF_8));
             });
             tab.navigate("http://localhost/").get();
         }

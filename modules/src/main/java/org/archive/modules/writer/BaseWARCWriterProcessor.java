@@ -221,7 +221,7 @@ abstract public class BaseWARCWriterProcessor extends WriterPoolProcessor
             for (WARCRecordInfo warcRecord: writer.getTmpRecordLog()) {
                 if ((warcRecord.getType() == WARCRecordType.response
                         || warcRecord.getType() == WARCRecordType.resource)) {
-                    history[0].put(A_WARC_FILE_PATH, writer.getFile().toString());
+                    history[0].put(A_WARC_FILE_PATH, StringUtils.removeEnd(writer.getFile().toString(), ".open"));
                     history[0].put(A_WARC_FILE_OFFSET, startPosition);
                     break;
                 }

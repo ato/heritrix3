@@ -1,5 +1,8 @@
 package org.archive.browser;
 
+import org.apache.commons.httpclient.Header;
+import org.apache.commons.lang.StringUtils;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.*;
@@ -37,20 +40,29 @@ public class ChromiumRequest {
         return Collections.unmodifiableMap(map);
     }
 
-    public void fulfill(int status, String reason, Collection<Map.Entry<String, String>> headers, byte[] body) {
-        enforceHandledOnce();
-        List<Map<String, String>> headerList = new ArrayList<>();
-        for (Map.Entry<String, String> entry : headers) {
-            Map<String, String> map = new HashMap<>();
-            map.put("name", entry.getKey());
-            map.put("value", entry.getValue());
-            headerList.add(map);
+    public void fulfill(int status, String reason, Header[] headers, byte[] body) {
+        JSONArray headerArray = new JSONArray();
+        for (Header header: headers) {
+            headerArray.put(new JSONObject().put("name", header.getName()).put("value", header.getValue()));
         }
+        fulfill(status, reason, headerArray, body);
+    }
+
+    public void fulfill(int status, String reason, Map<String, String> headers, byte[] body) {
+        JSONArray headerArray = new JSONArray();
+        for (Map.Entry<String, String> entry : headers.entrySet()) {
+            headerArray.put(new JSONObject().put("name", entry.getKey()).put("value", entry.getValue()));
+        }
+        fulfill(status, reason, headerArray, body);
+    }
+
+    private void fulfill(int status, String reason, JSONArray headerArray, byte[] body) {
+        enforceHandledOnce();
         JSONObject params = new JSONObject();
         params.put("requestId", id);
         params.put("responseCode", status);
-        if (!reason.equals("")) params.put("responsePhrase", reason);
-        params.put("responseHeaders", headerList);
+        if (!StringUtils.isEmpty(reason)) params.put("responsePhrase", reason);
+        params.put("responseHeaders", headerArray);
         params.put("body", Base64.getEncoder().encodeToString(body));
         tab.call("Fetch.fulfillRequest", params);
     }

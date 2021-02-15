@@ -1,4 +1,4 @@
-package org.archive.browser;
+package org.archive.modules.browser;
 
 public class ChromiumException extends RuntimeException {
     public ChromiumException(String message) {

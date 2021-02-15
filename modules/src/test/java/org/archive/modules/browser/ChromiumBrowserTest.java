@@ -1,4 +1,4 @@
-package org.archive.browser;
+package org.archive.modules.browser;
 
 import junit.framework.TestCase;
 
@@ -13,7 +13,7 @@ public class ChromiumBrowserTest extends TestCase {
         try (ChromiumBrowser browser = new ChromiumBrowser();
              ChromiumTab tab = browser.createTab()) {
             tab.interceptRequests(request -> {
-                System.out.println(request.url());
+                System.out.println(request.getUrl());
                 Map<String,String> headers = new HashMap<>();
                 headers.put("Content-Type", "text/html");
                 request.fulfill(200, "", headers, "<img src=hello.jpg>".getBytes(StandardCharsets.UTF_8));

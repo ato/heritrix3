@@ -1,11 +1,11 @@
-package org.archive.modules.extractor;
+package org.archive.modules.browser;
 
 import junit.framework.TestCase;
 import org.apache.commons.httpclient.URIException;
 import org.archive.modules.CrawlMetadata;
 import org.archive.modules.CrawlURI;
-import org.archive.modules.DispositionChain;
 import org.archive.modules.FetchChain;
+import org.archive.modules.browser.ExtractorChromium;
 import org.archive.modules.fetcher.DefaultServerCache;
 import org.archive.modules.fetcher.FetchHTTP;
 import org.archive.modules.fetcher.SimpleCookieStore;

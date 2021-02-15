@@ -1,4 +1,4 @@
-package org.archive.browser;
+package org.archive.modules.browser;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -61,9 +61,9 @@ public class ChromiumTab implements Closeable {
                         throw t;
                     }
                 }
-                if (!request.handled) {
-                    request.continueNormally();
-                }
+//                if (!request.handled) {
+//                    request.continueNormally();
+//                }
                 break;
             case "Page.loadEventFired":
                 if (loadFuture != null) {

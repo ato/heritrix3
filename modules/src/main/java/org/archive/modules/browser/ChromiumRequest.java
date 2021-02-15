@@ -1,4 +1,4 @@
-package org.archive.browser;
+package org.archive.modules.browser;
 
 import org.apache.commons.httpclient.Header;
 import org.apache.commons.lang.StringUtils;
@@ -21,15 +21,15 @@ public class ChromiumRequest {
         this.resourceType = resourceType;
     }
 
-    public String url() {
+    public String getUrl() {
         return request.getString("url");
     }
 
-    public String method() {
+    public String getMethod() {
         return request.getString("method");
     }
 
-    public Map<String, String> headers() {
+    public Map<String, String> getHeaders() {
         Map<String, String> map = new HashMap<>();
         JSONObject headers = request.getJSONObject("headers");
         for (Object key : headers.keySet()) {
@@ -50,8 +50,10 @@ public class ChromiumRequest {
 
     public void fulfill(int status, String reason, Map<String, String> headers, byte[] body) {
         JSONArray headerArray = new JSONArray();
-        for (Map.Entry<String, String> entry : headers.entrySet()) {
-            headerArray.put(new JSONObject().put("name", entry.getKey()).put("value", entry.getValue()));
+        if (headers != null) {
+            for (Map.Entry<String, String> entry : headers.entrySet()) {
+                headerArray.put(new JSONObject().put("name", entry.getKey()).put("value", entry.getValue()));
+            }
         }
         fulfill(status, reason, headerArray, body);
     }
@@ -88,9 +90,9 @@ public class ChromiumRequest {
     @Override
     public String toString() {
         return getClass().getSimpleName() + "{" +
-                "url='" + url() + '\'' +
-                ", method='" + method() + '\'' +
-                ", headers=" + headers() +
+                "url='" + getUrl() + '\'' +
+                ", method='" + getMethod() + '\'' +
+                ", headers=" + getHeaders() +
                 '}';
     }
 

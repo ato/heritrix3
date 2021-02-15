@@ -1,4 +1,4 @@
-package org.archive.browser;
+package org.archive.modules.browser;
 
 import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
@@ -10,7 +10,6 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import static java.nio.charset.StandardCharsets.ISO_8859_1;

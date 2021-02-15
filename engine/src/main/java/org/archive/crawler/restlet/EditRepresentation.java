@@ -69,15 +69,18 @@ public class EditRepresentation extends CharacterRepresentation {
         pw.println("<!DOCTYPE html>");
         pw.println("<html>");
         pw.println("<head><title>"+fileRepresentation.getFile().getName()+"</title>");
-        pw.println("<link rel='stylesheet' href='" + getStaticRef("codemirror/codemirror.css") + "'>");
-        pw.println("<link rel='stylesheet' href='" + getStaticRef("codemirror/util/dialog.css") + "'>");
-        pw.println("<script src='" + getStaticRef("codemirror/codemirror.js") + "'></script>");
-        pw.println("<script src='" + getStaticRef("codemirror/mode/xmlpure.js") + "'></script>");
-        pw.println("<script src='" + getStaticRef("codemirror/util/dialog.js") + "'></script>");
-        pw.println("<style>.CodeMirror { background: #fff; }</style>");
+//        pw.println("<link rel='stylesheet' href='" + getStaticRef("codemirror/codemirror.min.css") + "'>");
+//        pw.println("<link rel='stylesheet' href='" + getStaticRef("codemirror/addon/dialog/dialog.min.css") + "'>");
+//        pw.println("<script src='" + getStaticRef("codemirror/codemirror.min.js") + "'></script>");
+//        pw.println("<script src='" + getStaticRef("codemirror/mode/xml/xml.min.js") + "'></script>");
+//        pw.println("<script src='" + getStaticRef("codemirror/addon/dialog/dialog.min.js") + "'></script>");
+//        pw.println("<script src='" + getStaticRef("codemirror/addon/search/search.min.js") + "'></script>");
+//        pw.println("<script src='" + getStaticRef("codemirror/addon/search/searchcursor.min.js") + "'></script>");
+//        pw.println("<style>.CodeMirror { background: #fff; }</style>");
         pw.println("</head>");
         pw.println("<body style='background-color:#ddd'>");
-        pw.println("<form style='position:absolute;top:15px;bottom:15px;left:15px;right:15px;overflow:auto' method='POST'>");
+        pw.println("<form style='position:absolute;top:15px;bottom:15px;left:15px;right:15px;overflow:auto' method='POST' id=form>" +
+                "<div id=\"container\" style=\"height:98%;border:1px solid black;\"></div>");
         pw.println("<textarea style='width:98%;height:90%;font-family:monospace' name='contents' id='editor'>");
         StringEscapeUtils.escapeHtml(pw,fileRepresentation.getText()); 
         pw.println("</textarea>");
@@ -90,23 +93,32 @@ public class EditRepresentation extends CharacterRepresentation {
         Flash.renderFlashesHTML(pw, dirResource.getRequest());
         pw.println("</div>");
         pw.println("</form>");
-        pw.println("<script>");
-        pw.println("var editor = document.getElementById('editor');");
-        pw.println("var savebar = document.getElementById('savebar');");
-        pw.println("var savebutton = document.getElementById('savebutton');");
-        pw.println("var cmopts = {");
-        pw.println("    mode: {name: 'xmlpure'},");
-        pw.println("    indentUnit: 1, lineNumbers: true, autofocus: true,");
-        pw.println("    onChange: function() { savebutton.disabled = false; },");
-        pw.println("}");
-        pw.println("var cm = CodeMirror.fromTextArea(editor, cmopts);");
-        pw.println("window.onresize = function() {");
-        pw.println("    cm.getScrollerElement().style.height = innerHeight - savebar.offsetHeight - 30 + 'px';");
-        pw.println("    cm.refresh();");
-        pw.println("}");
-        pw.println("window.onresize();");
-        pw.println("savebutton.disabled = true;");
-        pw.println("</script>");
+        pw.println("<script src=\"https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.20.0/min/vs/loader.min.js\"></script>\n" +
+                "<script>\n" +
+                "let data = document.getElementById('editor').value;" +
+                "// Based on https://jsfiddle.net/developit/bwgkr6uq/ which just works but is based on unpkg.com.\n" +
+                "// Provided by loader.min.js.\n" +
+                "require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.20.0/min/vs' }});\n" +
+                "window.MonacoEnvironment = { getWorkerUrl: () => proxy };\n" +
+                "let proxy = URL.createObjectURL(new Blob([`\n" +
+                "    self.MonacoEnvironment = {\n" +
+                "        baseUrl: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.20.0/min'\n" +
+                "    };\n" +
+                "    importScripts('https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.20.0/min/vs/base/worker/workerMain.min.js');\n" +
+                "`], { type: 'text/javascript' }));\n" +
+                "require([\"vs/editor/editor.main\"], function () {\n" +
+                "    let editor = monaco.editor.create(document.getElementById('container'), {\n" +
+                "        value: data,\n" +
+                "        language: 'xml',\n" +
+//                "        theme: 'vs-dark'\n" +
+                "    });\n" +
+                "   document.getElementById('editor').outerHTML = '';" +
+                "        const form = document.getElementById(\"form\");\n" +
+                "        form.addEventListener(\"formdata\", e => {\n" +
+                "            e.formData.append('contents', editor.getModel().getValue());\n" +
+                "        });" +
+                "});\n" +
+                "</script>");
         pw.println("</body>");
         pw.println("</html>");
     }

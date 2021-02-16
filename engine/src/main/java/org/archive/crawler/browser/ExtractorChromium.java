@@ -1,16 +1,18 @@
-package org.archive.modules.browser;
+package org.archive.crawler.browser;
 
+import org.archive.crawler.framework.CrawlController;
+import org.archive.crawler.reporting.CrawlerLoggerModule;
 import org.archive.io.ArchiveReader;
 import org.archive.io.ArchiveReaderFactory;
 import org.archive.io.HeaderedArchiveRecord;
 import org.archive.modules.CrawlURI;
-import org.archive.modules.DispositionChain;
-import org.archive.modules.FetchChain;
 import org.archive.modules.extractor.ContentExtractor;
 import org.archive.modules.extractor.Hop;
 import org.archive.modules.extractor.LinkContext;
 import org.archive.modules.recrawl.PersistLoadProcessor;
 import org.archive.util.ArchiveUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.Lifecycle;
 
 import java.io.File;
@@ -33,27 +35,29 @@ public class ExtractorChromium extends ContentExtractor implements Lifecycle {
     private static final Logger logger = Logger.getLogger(ExtractorChromium.class.getName());
 
     private final SubrequestScheduler subrequestScheduler = new SubrequestScheduler();
-    private final FetchChain fetchChain;
-    private final DispositionChain dispositionChain;
     private final PersistLoadProcessor persistLoadProcessor;
+    private final CrawlController crawlController;
     private final List<SubrequestThread> subrequestThreads = new ArrayList<>();
 
     private int maxResourceSize = 10 * 1024 * 1024;
     private Set<String> requestHeaderBlacklist = new HashSet<>(Arrays.asList("te", "connection", "keep-alive",
             "trailer", "transfer-encoding", "host", "upgrade-insecure-requests"));
+    private final CrawlerLoggerModule crawlerLoggerModule;
 
-    public ExtractorChromium(FetchChain fetchChain, DispositionChain dispositionChain,
-                             PersistLoadProcessor persistLoadProcessor) {
-        this.fetchChain = fetchChain;
-        this.dispositionChain = dispositionChain;
+    public ExtractorChromium(CrawlController crawlController, PersistLoadProcessor persistLoadProcessor, CrawlerLoggerModule crawlerLoggerModule) {
+        this.crawlController = crawlController;
         this.persistLoadProcessor = persistLoadProcessor;
+        this.crawlerLoggerModule = crawlerLoggerModule;
     }
+
+    @Autowired
+    private ApplicationEventPublisher eventPublisher;
 
     @Override
     public void start() {
         super.start();
         for (int i = 0; i < 10; i++) {
-            SubrequestThread thread = new SubrequestThread(subrequestScheduler, i);
+            SubrequestThread thread = new SubrequestThread(crawlController, subrequestScheduler, crawlerLoggerModule, eventPublisher, i);
             subrequestThreads.add(thread);
             thread.start();
         }
@@ -151,7 +155,7 @@ public class ExtractorChromium extends ContentExtractor implements Lifecycle {
                         }
                         curi.getData().put("customHttpRequestHeaders", requestHeaders);
 
-                        subrequestScheduler.schedule(new Subrequest(request, curi, fetchChain, dispositionChain, maxResourceSize));
+                        subrequestScheduler.schedule(new Subrequest(request, curi, maxResourceSize));
                     }
                 }
             } catch (Throwable e) {

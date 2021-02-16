@@ -1,4 +1,4 @@
-package org.archive.modules.browser;
+package org.archive.crawler.browser;
 
 import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;

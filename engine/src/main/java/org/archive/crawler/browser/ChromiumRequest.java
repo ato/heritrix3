@@ -1,4 +1,4 @@
-package org.archive.modules.browser;
+package org.archive.crawler.browser;
 
 import org.apache.commons.httpclient.Header;
 import org.apache.commons.lang.StringUtils;

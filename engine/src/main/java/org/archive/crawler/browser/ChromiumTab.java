@@ -1,4 +1,4 @@
-package org.archive.modules.browser;
+package org.archive.crawler.browser;
 
 import org.json.JSONArray;
 import org.json.JSONObject;

@@ -79,6 +79,42 @@ public class ChromiumRequest {
         tab.call("Fetch.failRequest", new JSONObject().put("requestId", id).put("errorReason", errorReason));
     }
 
+    public void fail(int fetchStatus) {
+        fail(mapStatusToChromeErrorReason(fetchStatus));
+    }
+
+    private String mapStatusToChromeErrorReason(int fetchStatus) {
+        switch (fetchStatus) {
+            case -1:
+            case -6:
+            case -7:
+                return "NameNotResolved";
+            case -2:
+                return "ConnectionRefused";
+            case -3:
+                return "ConnectionReset";
+            case -4:
+                return "TimedOut";
+            case -61:
+            case -62:
+            case -63:
+            case -4001:
+            case -4002:
+            case -5000:
+            case -5001:
+            case -5002:
+            case -5003:
+            case -5004:
+            case -9998:
+                return "BlockedByClient";
+            case -6000:
+            case -7000:
+                return "ConnectionAborted";
+            default:
+                return "Failed";
+        }
+    }
+
     private void enforceHandledOnce() {
         if (handled) {
             throw new IllegalStateException("Request already handled");

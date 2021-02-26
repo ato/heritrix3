@@ -20,7 +20,7 @@ public class SubrequestScheduler {
 
     void schedule(Subrequest subrequest) throws URIException {
         synchronized (this) {
-            String key = subrequest.curi.getClassKey();
+            String key = subrequest.key;
             Queue<Subrequest> queue = queues.get(key);
             if (queue == null) {
                 queue = new ArrayDeque<>();
@@ -38,7 +38,7 @@ public class SubrequestScheduler {
         Queue<Subrequest> queue = readyQueues.take();
         synchronized (this) {
             Subrequest subrequest = queue.remove();
-            String key = subrequest.curi.getClassKey();
+            String key = subrequest.key;
             int active = activeRequestCounts.compute(key, (k, v) -> v == null ? 1 : v + 1);
             if (queue.isEmpty()) {
                 queues.remove(key);
@@ -52,7 +52,7 @@ public class SubrequestScheduler {
 
     void finished(Subrequest subrequest) {
         synchronized (this) {
-            String key = subrequest.curi.getClassKey();
+            String key = subrequest.key;
             int active = activeRequestCounts.get(key) - 1;
             assert active >= 0;
             if (active == 0) {
@@ -60,10 +60,12 @@ public class SubrequestScheduler {
             } else {
                 activeRequestCounts.put(key, active);
             }
-            Queue<Subrequest> queue = queues.get(key);
-            if (queue != null && !queue.isEmpty() && active < maxRequestsPerHost) {
-                assert !queue.isEmpty();
-                readyQueues.add(queue);
+            // if we were previously at the limit and now have spare request capacity make the queue ready again
+            if (active == maxRequestsPerHost - 1) {
+                Queue<Subrequest> queue = queues.get(key);
+                if (queue != null && !queue.isEmpty()) {
+                    readyQueues.add(queue);
+                }
             }
         }
     }

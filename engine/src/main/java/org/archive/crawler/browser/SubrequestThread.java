@@ -13,6 +13,7 @@ import java.util.logging.Level;
 
 import static org.archive.crawler.event.CrawlURIDispositionEvent.Disposition.FAILED;
 import static org.archive.crawler.event.CrawlURIDispositionEvent.Disposition.SUCCEEDED;
+import static org.archive.modules.fetcher.FetchStatusCodes.S_DEFERRED;
 
 /**
  * Worker thread for processing subrequests.
@@ -47,34 +48,53 @@ public class SubrequestThread extends Thread {
                 Subrequest subrequest = scheduler.next();
                 if (subrequest == null) return;
                 CrawlURI curi = subrequest.curi;
-                System.out.println("SRT start " + curi);
-                try {
-                    curi.setRecorder(Recorder.getHttpRecorder());
-                    crawlController.getFetchChain().process(curi, null);
-                    try {
-                        subrequest.browserRequest.fulfill(curi.getFetchStatus(), "", curi.getHttpResponseHeaders(),
-                                ExtractorChromium.readReplayContent(curi, subrequest.maxResourceSize));
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                    crawlController.getDispositionChain().process(curi, null);
-                } finally {
-                    System.out.println("SRT finished " + curi + " " + curi.getFetchStatus());
-                    scheduler.finished(subrequest);
-                    eventPublisher.publishEvent(new CrawlURIDispositionEvent(this, curi, curi.isSuccess() ? SUCCEEDED : FAILED));
-                    curi.aboutToLog();
-                    loggerModule.getUriProcessing().log(Level.INFO,
-                            curi.getUURI().toString(), new Object[]{curi});
-
-                    // tell the frontier not to bother with uri, we've already got it
-                    curi.setClassKey(null); // the frontier will set its own value
-                    crawlController.getFrontier().considerIncluded(curi);
-                }
+                process(subrequest, curi);
             }
         } catch (InterruptedException e) {
             // just exit
         } finally {
             recorder.closeRecorders();
+        }
+    }
+
+    private void process(Subrequest subrequest, CrawlURI curi) throws InterruptedException {
+        System.out.println("SRT start " + curi);
+        try {
+            while (true) {
+                curi.setRecorder(Recorder.getHttpRecorder());
+                crawlController.getFetchChain().process(curi, null);
+
+                if (curi.getFetchStatus() != S_DEFERRED || !curi.hasPrerequisiteUri()) break;
+
+                System.out.println("prereq " + curi.getPrerequisiteUri());
+                process(null, curi.getPrerequisiteUri());
+                curi.processingCleanup();
+                curi.clearPrerequisiteUri();
+            }
+
+            if (subrequest != null) {
+                try {
+                    if (curi.getFetchStatus() < 0) {
+                        subrequest.browserRequest.fail(curi.getFetchStatus());
+                    } else {
+                        subrequest.browserRequest.fulfill(curi.getFetchStatus(), "", curi.getHttpResponseHeaders(),
+                                ExtractorChromium.readReplayContent(curi, subrequest.maxResourceSize));
+                    }
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+            crawlController.getDispositionChain().process(curi, null);
+        } finally {
+            System.out.println("SRT finished " + curi + " " + curi.getFetchStatus());
+            if (subrequest != null) scheduler.finished(subrequest);
+            eventPublisher.publishEvent(new CrawlURIDispositionEvent(this, curi, curi.isSuccess() ? SUCCEEDED : FAILED));
+            curi.aboutToLog();
+            loggerModule.getUriProcessing().log(Level.INFO,
+                    curi.getUURI().toString(), new Object[]{curi});
+
+            // tell the frontier not to bother with uri, we've already got it
+            crawlController.getFrontier().considerIncluded(curi);
         }
     }
 }

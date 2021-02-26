@@ -144,7 +144,6 @@ public class ExtractorChromium extends ContentExtractor implements Lifecycle {
                 } else {
                     CrawlURI curi = uri.createCrawlURI(request.getUrl(), LinkContext.EMBED_MISC, Hop.EMBED);
                     curi.getAnnotations().add("subrequest");
-                    curi.setClassKey(curi.getUURI().getHost());
 
                     if (!fulfillWithPriorCapture(request, curi)) {
                         Map<String, String> requestHeaders = new HashMap<>();

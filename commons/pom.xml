@@ -32,9 +32,15 @@
 			<artifactId>httpmime</artifactId>
 		</dependency>
 		<dependency>
+			<!-- Only for its binding classes (com.sleepycat.bind): Heritrix stores its data in Onggi. -->
 			<groupId>com.sleepycat</groupId>
 			<artifactId>je</artifactId>
 			<version>7.5.11</version>
+		</dependency>
+		<dependency>
+			<groupId>com.moaduda</groupId>
+			<artifactId>onggi</artifactId>
+			<version>0.1.0-SNAPSHOT</version>
 		</dependency>
 		<dependency>
 			<groupId>commons-net</groupId>

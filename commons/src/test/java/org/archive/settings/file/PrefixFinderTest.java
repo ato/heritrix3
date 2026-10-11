@@ -19,8 +19,6 @@
 
 package org.archive.settings.file;
 
-import java.io.File;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -31,17 +29,9 @@ import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
-import org.apache.commons.io.FileUtils;
 import org.archive.util.PrefixFinder;
 
-import com.sleepycat.bind.tuple.StringBinding;
-import com.sleepycat.collections.StoredSortedMap;
-import com.sleepycat.je.Database;
-import com.sleepycat.je.DatabaseConfig;
-import com.sleepycat.je.Environment;
-import com.sleepycat.je.EnvironmentConfig;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -51,9 +41,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * @author pjack
  */
 public class PrefixFinderTest {
-    @TempDir
-    Path tempDir;
-
     public void xtestFind() {
         for (int i = 0; i < 100; i++) {
             doTest();
@@ -81,27 +68,6 @@ public class PrefixFinderTest {
     public void testSortedMap() {
         TreeMap<String,String> map = new TreeMap<String,String>();
         testUrlsNoMatch(map);
-    }
-
-    @Test
-    public void testStoredSortedMap() throws Exception {
-        EnvironmentConfig config = new EnvironmentConfig();
-        config.setAllowCreate(true);      
-        config.setCachePercent(5);
-        
-        File f = new File(tempDir.toFile(), "PrefixFinderText");
-        FileUtils.deleteQuietly(f);
-        org.archive.util.FileUtils.ensureWriteableDirectory(f);
-        Environment bdbEnvironment = new Environment(f, config);
-        DatabaseConfig dbConfig = new DatabaseConfig();
-        dbConfig.setAllowCreate(true);
-        dbConfig.setDeferredWrite(true);
-        Database db = bdbEnvironment.openDatabase(null, "test", dbConfig);
-        
-        StoredSortedMap<String, String> ssm = new StoredSortedMap<String, String>(db, new StringBinding(), new StringBinding(), true);        
-        testUrlsNoMatch(ssm);   
-        db.close();
-        bdbEnvironment.close();
     }
 
     private void testUrlsNoMatch(SortedMap<String,String> sm) {

@@ -26,16 +26,13 @@ import java.util.NoSuchElementException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Logger;
 
+import com.moaduda.onggi.Keyspace;
 import com.sleepycat.bind.EntryBinding;
 import com.sleepycat.bind.serial.SerialBinding;
-import com.sleepycat.bind.serial.StoredClassCatalog;
 import com.sleepycat.bind.tuple.TupleBinding;
-import com.sleepycat.collections.StoredSortedMap;
-import com.sleepycat.je.Database;
-import com.sleepycat.je.DatabaseException;
 
 /**
- * Queue backed by a JE Collections StoredSortedMap. 
+ * Queue backed by a StoredSortedMap over an Onggi keyspace. 
  * 
  * @author gojomo
  *
@@ -47,42 +44,39 @@ public class StoredQueue<E extends Serializable> extends AbstractQueue<E>  {
         Logger.getLogger(StoredQueue.class.getName());
 
     protected transient StoredSortedMap<Long,E> queueMap; // Long -> E
-    protected transient Database queueDb; // Database
     protected AtomicLong tailIndex; // next spot for insert
     protected transient volatile E peekItem = null;
     
     /**
-     * Create a StoredQueue backed by the given Database. 
+     * Create a StoredQueue backed by the given keyspace. 
      * 
      * The Class of values to be queued may be provided; there is only a 
      * benefit when a primitive type is specified. A StoredClassCatalog
      * must be provided if a primitive type is not supplied. 
      * 
-     * @param db
+     * @param keyspace
      * @param clsOrNull 
      * @param classCatalog
      */
-    public StoredQueue(Database db, Class<E> clsOrNull, StoredClassCatalog classCatalog) {
-        hookupDatabase(db, clsOrNull, classCatalog);
+    public StoredQueue(Keyspace keyspace, Class<E> clsOrNull, StoredClassCatalog classCatalog) {
+        hookupDatabase(keyspace, clsOrNull, classCatalog);
         tailIndex = new AtomicLong(queueMap.isEmpty() ? 0L : queueMap.lastKey()+1);
     }
 
     /**
-     * @param db
+     * @param keyspace
      * @param clsOrNull
      * @param classCatalog
      */
-    public void hookupDatabase(Database db, Class<E> clsOrNull, StoredClassCatalog classCatalog) {
+    public void hookupDatabase(Keyspace keyspace, Class<E> clsOrNull, StoredClassCatalog classCatalog) {
         EntryBinding<E> valueBinding = TupleBinding.getPrimitiveBinding(clsOrNull);
         if(valueBinding == null) {
             valueBinding = new SerialBinding<E>(classCatalog, clsOrNull);
         }
-        queueDb = db;
         queueMap = new StoredSortedMap<Long,E>(
-                db,
+                keyspace,
                 TupleBinding.getPrimitiveBinding(Long.class),
-                valueBinding,
-                true);
+                valueBinding);
     }
 
     @Override
@@ -140,25 +134,7 @@ public class StoredQueue<E extends Serializable> extends AbstractQueue<E>  {
         return head; 
     }
 
-    /**
-     * A suitable DatabaseConfig for the Database backing a StoredQueue. 
-     * (However, it is not necessary to use these config options.)
-     * 
-     * @return DatabaseConfig suitable for queue
-     */
-    public static BdbModule.BdbConfig databaseConfig() {
-        BdbModule.BdbConfig dbConfig = new BdbModule.BdbConfig();
-        dbConfig.setTransactional(false);
-        dbConfig.setAllowCreate(true);
-        return dbConfig;
-    }
-    
+    /** Does nothing: the queue's store is synced and closed by its BdbModule. */
     public void close() {
-        try {
-            queueDb.sync();
-            queueDb.close();
-        } catch (DatabaseException e) {
-            throw new RuntimeException(e);
-        }
     }
 }

@@ -19,60 +19,27 @@
 
 package org.archive.bdb;
 
-import java.util.logging.Level;
-import java.util.logging.Logger;
-
-import com.sleepycat.bind.EntityBinding;
+import com.moaduda.onggi.Keyspace;
+import com.moaduda.onggi.Store;
 import com.sleepycat.bind.EntryBinding;
-import com.sleepycat.collections.PrimaryKeyAssigner;
-import com.sleepycat.collections.StoredSortedMap;
-import com.sleepycat.je.Database;
-import com.sleepycat.je.DatabaseException;
 
 /**
- * TempStoredSortedMap remembers its backing Database, and offers
- * a dispose() method for closing/discarding the underlying Database. 
- * 
- * You *must* call dispose() when done with the map; otherwise temporary data
- * will remain in a temporary Database in the BDB environment indefinitely. 
- * 
- * @author gojomo
- * @param <K>
- * @param <V>
+ * A StoredSortedMap whose keyspace is dropped by {@link #dispose()}, for
+ * transient uses such as reports.
  */
 public class DisposableStoredSortedMap<K,V> extends StoredSortedMap<K,V> {
-    final private static Logger LOGGER = 
-        Logger.getLogger(DisposableStoredSortedMap.class.getName()); 
-    protected Database db;
-    
-    public DisposableStoredSortedMap(Database db, EntryBinding<K> arg1, EntityBinding<V> arg2, boolean arg3) {
-        super(db, arg1, arg2, arg3);
-        this.db = db;
-    }
-    public DisposableStoredSortedMap(Database db, EntryBinding<K> arg1, EntityBinding<V> arg2, PrimaryKeyAssigner arg3) {
-        super(db, arg1, arg2, arg3);
-        this.db = db;
-    }
-    public DisposableStoredSortedMap(Database db, EntryBinding<K> arg1, EntryBinding<V> arg2, boolean arg3) {
-        super(db, arg1, arg2, arg3);
-        this.db = db;
-    }
-    public DisposableStoredSortedMap(Database db, EntryBinding<K> arg1, EntryBinding<V> arg2, PrimaryKeyAssigner arg3) {
-        super(db, arg1, arg2, arg3);
-        this.db = db;
+    protected Store store;
+
+    public DisposableStoredSortedMap(Store store, Keyspace keyspace, EntryBinding<K> keyBinding,
+            EntryBinding<V> valueBinding, boolean duplicates) {
+        super(keyspace, keyBinding, valueBinding, duplicates);
+        this.store = store;
     }
 
     public void dispose() {
-        String name = null;
-        try {
-            if(this.db!=null) {
-                name = this.db.getDatabaseName();
-                this.db.close();
-                this.db.getEnvironment().removeDatabase(null, name);
-                this.db = null; 
-            }
-        } catch (DatabaseException e) {
-            LOGGER.log(Level.WARNING, "Error closing db " + name, e);
-        } 
+        if (this.store != null) {
+            this.store.dropKeyspace(keyspace.name());
+            this.store = null;
+        }
     }
 }

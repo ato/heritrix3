@@ -28,9 +28,6 @@ import java.util.SortedSet;
 
 import org.apache.commons.lang3.StringUtils;
 
-import com.sleepycat.collections.StoredSortedKeySet;
-import com.sleepycat.collections.StoredSortedMap;
-import com.sleepycat.collections.StoredSortedValueSet;
 
 
 /**
@@ -79,17 +76,7 @@ public class PrefixFinder {
         if(set instanceof NavigableSet) {
             return ((NavigableSet<String>)set).headSet(input, true);
         }
-        // use Stored*Set inclusive version if available
-        if(set instanceof StoredSortedKeySet) {
-            return ((StoredSortedKeySet<String>)set).headSet(input, true);
-        }
-        if(set instanceof StoredSortedValueSet) {
-            return ((StoredSortedValueSet<String>)set).headSet(input, true);
-        }
         // Use synthetic "one above" trick
-        // NOTE: because '\0' sorts in the middle in "java modified UTF-8",
-        // used in the Stored* class StringBindings, this trick won't work
-        // there
         return set.headSet(input+'\0');
     }
 
@@ -125,14 +112,7 @@ public class PrefixFinder {
         if(map instanceof NavigableMap) {
             return ((NavigableMap<String, ?>)map).headMap(input, true);
         }
-        // use StoredSortedMap inclusive version if available
-        if(map instanceof StoredSortedMap) {
-            return ((StoredSortedMap<String, ?>)map).headMap(input, true);
-        }
         // Use synthetic "one above" trick
-        // NOTE: because '\0' sorts in the middle in "java modified UTF-8",
-        // used in the Stored* class StringBindings, this trick won't work
-        // there
         return map.headMap(input+'\0');
     }
 

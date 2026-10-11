@@ -31,18 +31,16 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import org.archive.bdb.KryoBinding;
+import org.archive.bdb.StoredSortedMap;
 
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.RemovalListener;
 import com.google.common.cache.RemovalNotification;
+import com.moaduda.onggi.Cursor;
+import com.moaduda.onggi.Keyspace;
+import com.moaduda.onggi.Store;
 import com.sleepycat.bind.EntryBinding;
-import com.sleepycat.bind.serial.StoredClassCatalog;
 import com.sleepycat.bind.tuple.TupleBinding;
-import com.sleepycat.collections.StoredSortedMap;
-import com.sleepycat.je.Database;
-import com.sleepycat.je.DatabaseConfig;
-import com.sleepycat.je.DatabaseException;
-import com.sleepycat.je.Environment;
 
 /**
  * A BDB JE backed object cache. 
@@ -72,7 +70,9 @@ implements ObjectIdentityCache<V>, Closeable, Serializable {
         Logger.getLogger(ObjectIdentityBdbManualCache.class.getName());
 
     /** The BDB JE database used for this instance. */
-    protected transient Database db;
+    protected transient Store store;
+
+    protected transient Keyspace db;
 
     /** in-memory map of new/recent/still-referenced-elsewhere instances */
     protected transient ConcurrentMap<String,V> memMap;
@@ -102,10 +102,10 @@ implements ObjectIdentityCache<V>, Closeable, Serializable {
 
     /**
      * Constructor. You must call
-     * {@link #initialize(Environment, String, Class, StoredClassCatalog)}
+     * {@link #initialize(Store, Keyspace, Class)}
      * to finish construction. Construction is two-stepped to support
-     * reconnecting a deserialized CachedBdbMap with its backing bdbje
-     * database.
+     * reconnecting a deserialized CachedBdbMap with its backing
+     * keyspace.
      */
     public ObjectIdentityBdbManualCache() {
         super();
@@ -126,55 +126,45 @@ implements ObjectIdentityCache<V>, Closeable, Serializable {
     /**
      * Call this method when you have an instance when you used the
      * default constructor or when you have a deserialized instance that you
-     * want to reconnect with an extant bdbje environment.
-     * @param env
-     * @param dbName
-     * @param valueClass
-     * @param classCatalog
-     * @throws DatabaseException
+     * want to reconnect with an extant keyspace.
+     * 
+     * @param store Store the keyspace belongs to.
+     * @param keyspace Keyspace to keep the cache in.
+     * @param valueClass Class of values.
      */
-    public void initialize(final Environment env, String dbName,
-            final Class valueClass, final StoredClassCatalog classCatalog)
-    throws DatabaseException {
-        // TODO: tune capacity for actual threads, expected size of key caches?
+    public void initialize(final Store store, final Keyspace keyspace, final Class valueClass) {
         this.memMap = CacheBuilder.newBuilder()
                 .concurrencyLevel(64)
                 .initialCapacity(8192)
                 .softValues()
                 .<String, V>build()
                 .asMap();
-        this.db = openDatabase(env, dbName);
-        this.diskMap = createDiskMap(this.db, classCatalog, valueClass);
-        // keep a record of items that must be persisted; auto-persist if 
-        // unchanged after 5 minutes, or more than 10K would collect
+        this.store = store;
+        this.db = keyspace;
+        this.diskMap = createDiskMap(this.db, valueClass);
+        this.count = new AtomicLong(countKeys(keyspace));
+    }
 
-        this.count = new AtomicLong(diskMap.size());
+    /** Counts the keyspace's keys once, with a key scan; the count is kept by hand after that. */
+    private static long countKeys(Keyspace keyspace) {
+        long n = 0;
+        try (Cursor cursor = keyspace.cursor()) {
+            for (boolean ok = cursor.first(); ok; ok = cursor.next()) {
+                n++;
+            }
+        }
+        return n;
     }
 
     @SuppressWarnings("unchecked")
-    protected StoredSortedMap<String, V> createDiskMap(Database database,
-            StoredClassCatalog classCatalog, Class valueClass) {
+    protected StoredSortedMap<String, V> createDiskMap(Keyspace keyspace, Class valueClass) {
         EntryBinding keyBinding = TupleBinding.getPrimitiveBinding(String.class);
         EntryBinding valueBinding = TupleBinding.getPrimitiveBinding(valueClass);
         if(valueBinding == null) {
             valueBinding = 
                 new KryoBinding<V>(valueClass);
-//                new SerialBinding(classCatalog, valueClass);
-//                new BenchmarkingBinding<V>(new EntryBinding[] {
-//                      new KryoBinding<V>(valueClass),                   
-//                      new RecyclingSerialBinding<V>(classCatalog, valueClass),
-//                  }, valueClass);
         }
-        return new StoredSortedMap<String,V>(database, keyBinding, valueBinding, true);
-    }
-
-    protected Database openDatabase(final Environment environment,
-            final String dbName) throws DatabaseException {
-        DatabaseConfig dbConfig = new DatabaseConfig();
-        dbConfig.setTransactional(false);
-        dbConfig.setAllowCreate(true);
-        dbConfig.setDeferredWrite(true);
-        return environment.openDatabase(null, dbName, dbConfig);
+        return new StoredSortedMap<String,V>(keyspace, keyBinding, valueBinding);
     }
 
     /* (non-Javadoc)
@@ -185,9 +175,7 @@ implements ObjectIdentityCache<V>, Closeable, Serializable {
         if (this.db != null) {
             try {
                 sync(); 
-                this.db.sync();
-                this.db.close();
-            } catch (DatabaseException e) {
+            } catch (RuntimeException e) {
                 logger.log(Level.WARNING,"problem closing ObjectIdentityBdbCache",e);
             } finally {
                 this.db = null;
@@ -317,15 +305,7 @@ implements ObjectIdentityCache<V>, Closeable, Serializable {
     }
     
     protected String getDatabaseName() {
-        String name = "DbName-Lookup-Failed";
-        try {
-            if (this.db != null) {
-                name = this.db.getDatabaseName();
-            }
-        } catch (DatabaseException e) {
-            // Ignore.
-        }
-        return name;
+        return this.db != null ? this.db.name() : "DbName-Lookup-Failed";
     }
     
     /**
@@ -350,11 +330,7 @@ implements ObjectIdentityCache<V>, Closeable, Serializable {
             diskMap.put(entry.getKey(), entry.getValue());
         }
         
-        try {
-            this.db.sync();
-        } catch (DatabaseException e) {
-            throw new RuntimeException(e);
-        }
+        this.store.sync();
         
         
         if (logger.isLoggable(Level.FINE)) {

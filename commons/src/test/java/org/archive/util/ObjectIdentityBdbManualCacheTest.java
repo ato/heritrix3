@@ -27,7 +27,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 
 import org.apache.commons.io.FileUtils;
-import org.archive.util.bdbje.EnhancedEnvironment;
+import com.moaduda.onggi.Options;
+import com.moaduda.onggi.Store;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.io.TempDir;
@@ -45,7 +46,7 @@ public class ObjectIdentityBdbManualCacheTest {
 
     @TempDir
     Path tempDir;
-    EnhancedEnvironment env;
+    Store env;
     private ObjectIdentityBdbManualCache<IdentityCacheableWrapper<HashMap<String,String>>> cache;
 
     @BeforeEach
@@ -54,16 +55,16 @@ public class ObjectIdentityBdbManualCacheTest {
         org.archive.util.FileUtils.ensureWriteableDirectory(envDir);
         FileUtils.deleteDirectory(envDir);
         org.archive.util.FileUtils.ensureWriteableDirectory(envDir);
-        env = EnhancedEnvironment.getTestEnvironment(envDir); 
+        env = Store.open(envDir.toPath(), Options.defaults());
         this.cache = new ObjectIdentityBdbManualCache<IdentityCacheableWrapper<HashMap<String,String>>>();
-        this.cache.initialize(env,"setUpCache",IdentityCacheableWrapper.class, env.getClassCatalog());
+        this.cache.initialize(env, env.keyspace("setUpCache"), IdentityCacheableWrapper.class);
     }
 
     @AfterEach
     public void tearDown() throws Exception {
         this.cache.close();
-        File envDir = env.getHome();
-        env.close(); 
+        File envDir = tempDir.toFile();
+        env.close();
         FileUtils.deleteDirectory(envDir);
     }
 
@@ -72,10 +73,7 @@ public class ObjectIdentityBdbManualCacheTest {
     public void testReadConsistencyUnderLoad() throws Exception {
         final ObjectIdentityBdbManualCache<IdentityCacheableWrapper<AtomicInteger>> cbdbmap =
             new ObjectIdentityBdbManualCache<>();
-        cbdbmap.initialize(env, 
-                    "consistencyCache",
-                    IdentityCacheableWrapper.class,
-                    env.getClassCatalog());
+        cbdbmap.initialize(env, env.keyspace("consistencyCache"), IdentityCacheableWrapper.class);
         try {
             final int keyCount = 128 * 1024; // 128K  keys
             final int maxLevel = 64; 

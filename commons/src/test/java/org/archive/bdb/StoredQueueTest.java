@@ -25,11 +25,9 @@ import java.util.NoSuchElementException;
 import java.util.concurrent.LinkedBlockingQueue;
 
 import org.apache.commons.io.FileUtils;
-import org.archive.util.bdbje.EnhancedEnvironment;
 
-import com.sleepycat.je.Database;
-import com.sleepycat.je.DatabaseException;
-import com.sleepycat.je.EnvironmentConfig;
+import com.moaduda.onggi.Options;
+import com.moaduda.onggi.Store;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,31 +39,21 @@ public class StoredQueueTest {
     @TempDir
     Path tempDir;
     StoredQueue<String> queue;
-    EnhancedEnvironment env;
-    Database db; 
+    Store store;
     File envDir; 
 
     @BeforeEach
     public void setUp() throws Exception {
         this.envDir = new File(tempDir.toFile(),"StoredMapTest");
         org.archive.util.FileUtils.ensureWriteableDirectory(this.envDir);
-        try {
-            EnvironmentConfig envConfig = new EnvironmentConfig();
-            envConfig.setTransactional(false);
-            envConfig.setAllowCreate(true);
-            env = new EnhancedEnvironment(envDir,envConfig);
-            BdbModule.BdbConfig dbConfig = StoredQueue.databaseConfig();
-            db = env.openDatabase(null, "StoredMapTest", dbConfig.toDatabaseConfig());
-        } catch (DatabaseException e) {
-            throw new RuntimeException(e);
-        }
-        this.queue = new StoredQueue<String>(db, String.class, env.getClassCatalog());
+        store = Store.open(envDir.toPath(), Options.defaults());
+        this.queue = new StoredQueue<String>(store.keyspace("StoredMapTest"), String.class,
+                new StoredClassCatalog(store));
     }
 
     @AfterEach
     protected void tearDown() throws Exception {
-        db.close();
-        env.close(); 
+        store.close();
         FileUtils.deleteDirectory(this.envDir);
     }
 

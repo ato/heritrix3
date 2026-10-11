@@ -21,6 +21,7 @@ package org.archive.crawler.frontier;
 import java.io.IOException;
 import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -31,9 +32,6 @@ import org.archive.crawler.frontier.precedence.SimplePrecedenceProvider;
 import org.archive.modules.CrawlURI;
 import org.archive.modules.fetcher.FetchStats;
 import org.archive.util.ArchiveUtils;
-
-import com.sleepycat.je.DatabaseEntry;
-import com.sleepycat.je.DatabaseException;
 
 
 /**
@@ -54,6 +52,21 @@ implements Serializable {
     private byte[] origin;
 
     /**
+     * The key of the last item dequeued (deleted) from this queue, so that
+     * the next peek seeks past the deleted items at the queue's head instead
+     * of from its origin; null to seek from the origin. Not saved with the
+     * queue: after a resume the first peek seeks from the origin.
+     */
+    private transient volatile byte[] lastDequeued;
+
+    /**
+     * Whether an item was inserted at or before the peeked item while it
+     * was in flight. Dequeuing the peeked item then leaves an item before
+     * its key, so its key is not remembered.
+     */
+    private transient boolean insertedBeforePeeked;
+
+    /**
      * Create a virtual queue inside the given BdbMultipleWorkQueues 
      * 
      * @param classKey
@@ -71,24 +84,18 @@ implements Serializable {
 
     protected long deleteMatchingFromQueue(final WorkQueueFrontier frontier,
             final String match) throws IOException {
-        try {
-            final BdbMultipleWorkQueues queues = ((BdbFrontier) frontier)
-                .getWorkQueues();
-            return queues.deleteMatchingFromQueue(match, classKey,
-                new DatabaseEntry(origin));
-        } catch (DatabaseException e) {
-            throw new IOException(e);
-        }
+        final BdbMultipleWorkQueues queues = ((BdbFrontier) frontier)
+            .getWorkQueues();
+        lastDequeued = null;
+        return queues.deleteMatchingFromQueue(match, classKey, origin);
     }
 
     protected void deleteItem(final WorkQueueFrontier frontier,
             final CrawlURI peekItem) throws IOException {
-        try {
-            final BdbMultipleWorkQueues queues = ((BdbFrontier) frontier)
-                .getWorkQueues();
-             queues.delete(peekItem);
-        } catch (DatabaseException e) {
-            throw new IOException(e);
+        final BdbMultipleWorkQueues queues = ((BdbFrontier) frontier)
+            .getWorkQueues();
+        if (queues.delete(peekItem)) {
+            lastDequeued = insertedBeforePeeked ? null : (byte[]) peekItem.getHolderKey();
         }
     }
 
@@ -96,26 +103,22 @@ implements Serializable {
     throws IOException {
         final BdbMultipleWorkQueues queues = ((BdbFrontier) frontier)
             .getWorkQueues();
-        DatabaseEntry key = new DatabaseEntry(origin);
         CrawlURI curi = null;
         int tries = 1;
+        insertedBeforePeeked = false;
         while(true) {
-            try {
-                curi = queues.get(key);
-            } catch (DatabaseException e) {
-                LOGGER.log(Level.SEVERE,"peekItem failure; retrying",e);
-            }
+            byte[] after = tries == 1 ? lastDequeued : null;
+            curi = queues.get(origin, after);
             
             // ensure CrawlURI, if any,  came from acceptable range: 
-            if(!ArchiveUtils.startsWith(key.getData(),origin)) {
+            if(curi != null && !ArchiveUtils.startsWith((byte[]) curi.getHolderKey(),origin)) {
                 LOGGER.severe(
                     "inconsistency: "+classKey+"("+
                     getPrefixClassKey(origin)+") with " + getCount() + " items gave "
-                    + curi +"("+getPrefixClassKey(key.getData()));
-                // clear curi to allow retry
+                    + curi +"("+getPrefixClassKey((byte[]) curi.getHolderKey()));
+                // clear curi to allow retry from the origin
                 curi = null; 
-                // reset key to original origin for retry
-                key.setData(origin);
+                lastDequeued = null;
             }
             
             if (curi!=null) {
@@ -131,7 +134,7 @@ implements Serializable {
             LOGGER.severe("Trying get #" + Integer.toString(tries)
                     + " in queue " + classKey + " with " + getCount()
                     + " items using key "
-                    + getPrefixClassKey(key.getData()));
+                    + getPrefixClassKey(origin));
         }
  
         return curi;
@@ -139,17 +142,23 @@ implements Serializable {
 
     protected void insertItem(final WorkQueueFrontier frontier,
             final CrawlURI curi, boolean overwriteIfPresent) throws IOException {
-        try {
-            final BdbMultipleWorkQueues queues = ((BdbFrontier) frontier)
-                .getWorkQueues();
-            queues.put(curi, overwriteIfPresent);
-            if (LOGGER.isLoggable(Level.FINE)) {
-                LOGGER.fine("Inserted into " + getPrefixClassKey(this.origin) +
-                    " (count " + Long.toString(getCount())+ "): " +
-                        curi.toString());
-            }
-        } catch (DatabaseException e) {
-            throw new IOException(e);
+        final BdbMultipleWorkQueues queues = ((BdbFrontier) frontier)
+            .getWorkQueues();
+        queues.put(curi, overwriteIfPresent);
+        byte[] key = (byte[]) curi.getHolderKey();
+        byte[] last = lastDequeued;
+        if (last != null && Arrays.compareUnsigned(key, last) <= 0) {
+            // sorts before the remembered head: seek from the origin again
+            lastDequeued = null;
+        }
+        CrawlURI peeked = peekItem;
+        if (peeked != null && Arrays.compareUnsigned(key, (byte[]) peeked.getHolderKey()) <= 0) {
+            insertedBeforePeeked = true;
+        }
+        if (LOGGER.isLoggable(Level.FINE)) {
+            LOGGER.fine("Inserted into " + getPrefixClassKey(this.origin) +
+                " (count " + Long.toString(getCount())+ "): " +
+                    curi.toString());
         }
     }
     

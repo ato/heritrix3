@@ -24,7 +24,6 @@ import java.util.Map;
 
 import org.archive.bdb.DisposableStoredSortedMap;
 
-import com.sleepycat.collections.StoredIterator;
 
 
 /**
@@ -69,7 +68,6 @@ public class SeedsReport extends Report {
             }
             writer.print("\n");
         }
-        StoredIterator.close(iter);
         seedsByCode.dispose();
         stats.seedsTotal = seedsTotal;
         stats.seedsCrawled = seedsCrawled; 

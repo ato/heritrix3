@@ -38,12 +38,11 @@ import org.archive.checkpointing.Checkpoint;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import com.google.common.net.InternetDomainName;
+import org.archive.bdb.StoredClassCatalog;
+import org.archive.bdb.StoredSortedMap;
+
 import com.sleepycat.bind.ByteArrayBinding;
 import com.sleepycat.bind.serial.SerialBinding;
-import com.sleepycat.bind.serial.StoredClassCatalog;
-import com.sleepycat.collections.StoredSortedMap;
-import com.sleepycat.je.Database;
-import com.sleepycat.je.DatabaseException;
 
 /**
  * Cookie store using bdb for storage. Cookies are stored in a SortedMap keyed
@@ -106,25 +105,14 @@ public class BdbCookieStore extends AbstractCookieStore implements
 
     public static String COOKIEDB_NAME = "hc_httpclient_cookies";
 
-    private transient Database cookieDb;
     private transient StoredSortedMap<byte[],Cookie> cookies;
 
     public void prepare() {
-        try {
-            StoredClassCatalog classCatalog = bdb.getClassCatalog();
-            BdbModule.BdbConfig dbConfig = new BdbModule.BdbConfig();
-            dbConfig.setTransactional(false);
-            dbConfig.setAllowCreate(true);
-            dbConfig.setSortedDuplicates(false);
-            cookieDb = bdb.openDatabase(COOKIEDB_NAME, dbConfig,
-                    isCheckpointRecovery);
-            cookies = new StoredSortedMap<byte[],Cookie>(cookieDb,
-                    new ByteArrayBinding(), 
-                    new SerialBinding<Cookie>(classCatalog, Cookie.class), 
-                    true);
-        } catch (DatabaseException e) {
-            throw new RuntimeException(e);
-        }
+        StoredClassCatalog classCatalog = bdb.getClassCatalog();
+        cookies = new StoredSortedMap<byte[],Cookie>(
+                bdb.openDatabase(COOKIEDB_NAME, isCheckpointRecovery),
+                new ByteArrayBinding(), 
+                new SerialBinding<Cookie>(classCatalog, Cookie.class));
     }
 
     public void addCookieImpl(Cookie cookie) {

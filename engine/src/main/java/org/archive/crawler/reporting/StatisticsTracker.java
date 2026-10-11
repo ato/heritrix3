@@ -77,7 +77,6 @@ import org.springframework.context.Lifecycle;
 import org.xbill.DNS.DClass;
 import org.xbill.DNS.Lookup;
 
-import com.sleepycat.je.DatabaseException;
 
 /**
  * This is an implementation of the AbstractTracker. It is designed to function
@@ -419,8 +418,6 @@ public class StatisticsTracker
                     crawledBytes,
                     json.getJSONObject("crawledBytes"));
             }
-        } catch (DatabaseException e) {
-            throw new IllegalStateException(e);
         } catch (JSONException e) {
             throw new IllegalStateException(e);
         }

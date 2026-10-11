@@ -23,6 +23,7 @@ import java.io.PrintWriter;
 import java.io.UnsupportedEncodingException;
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
@@ -37,23 +38,21 @@ import org.archive.modules.CrawlURI;
 import org.archive.util.ArchiveUtils;
 
 import com.google.common.base.Charsets;
+import com.moaduda.onggi.Cursor;
+import com.moaduda.onggi.Keyspace;
 import com.sleepycat.bind.EntryBinding;
-import com.sleepycat.bind.serial.StoredClassCatalog;
-import com.sleepycat.je.Cursor;
-import com.sleepycat.je.Database;
 import com.sleepycat.je.DatabaseEntry;
-import com.sleepycat.je.DatabaseException;
-import com.sleepycat.je.OperationStatus;
 import com.sleepycat.util.RuntimeExceptionWrapper;
 
 /**
- * A BerkeleyDB-database-backed structure for holding ordered
+ * A keyspace-backed structure for holding ordered
  * groupings of CrawlURIs. Reading the groupings from specific
  * per-grouping (per-classKey/per-Host) starting points allows
  * this to act as a collection of independent queues.
  * 
  * <p>
- * For how the bdb keys are made, see {@link #calculateInsertKey(CrawlURI)}.
+ * For how the keys are made, see {@link #calculateInsertKey(CrawlURI)}.
+ * A CrawlURI's holder key is its key, as a byte array.
  * 
  * <p>
  * TODO: refactor, improve naming.
@@ -66,29 +65,22 @@ public class BdbMultipleWorkQueues {
 
     private static final Logger LOGGER = Logger.getLogger(BdbMultipleWorkQueues.class.getName());
 
-    /** Database holding all pending URIs, grouped in virtual queues */
-    private Database pendingUrisDB = null;
+    /** Keyspace holding all pending URIs, grouped in virtual queues */
+    private Keyspace pendingUrisDB = null;
 
-    /** Supporting bdb serialization of CrawlURIs */
+    /** Supporting serialization of CrawlURIs */
     private EntryBinding<CrawlURI> crawlUriBinding;
 
     /**
-     * Create the multi queue in the given environment.
-     * 
-     * @throws DatabaseException
+     * Create the multi queue in the given keyspace.
      */
-    public BdbMultipleWorkQueues(Database db,
-            StoredClassCatalog classCatalog)
-            throws DatabaseException {
+    public BdbMultipleWorkQueues(Keyspace db) {
         this.pendingUrisDB = db;
         crawlUriBinding = new KryoBinding<CrawlURI>(CrawlURI.class);
-        // new RecyclingSerialBinding<CrawlURI>(classCatalog, CrawlURI.class);
-        // new BenchmarkingBinding<CrawlURI>(new EntryBinding[] {
-        // new KryoBinding<CrawlURI>(CrawlURI.class,true),
-        // new KryoBinding<CrawlURI>(CrawlURI.class,false),
-        // new RecyclingSerialBinding<CrawlURI>(classCatalog, CrawlURI.class),
-        // });
+    }
 
+    private CrawlURI decode(byte[] value) {
+        return crawlUriBinding.entryToObject(new DatabaseEntry(value));
     }
 
     /**
@@ -98,40 +90,27 @@ public class BdbMultipleWorkQueues {
      * @param queue
      * @param headKey
      * @return count of deleted items
-     * @throws DatabaseException
-     * @throws DatabaseException
      */
     public long deleteMatchingFromQueue(String match, String queue,
-            DatabaseEntry headKey) throws DatabaseException {
+            byte[] headKey) {
         long deletedCount = 0;
         Pattern pattern = Pattern.compile(match);
-        DatabaseEntry key = headKey;
-        DatabaseEntry value = new DatabaseEntry();
-        Cursor cursor = null;
         Thread.interrupted();
-        try {
-            cursor = pendingUrisDB.openCursor(null, null);
-            OperationStatus result = cursor.getSearchKeyRange(headKey,
-                    value, null);
-
-            while (result == OperationStatus.SUCCESS) {
-                if (value.getData().length > 0) {
-                    CrawlURI curi = (CrawlURI) crawlUriBinding
-                            .entryToObject(value);
+        try (Cursor cursor = pendingUrisDB.cursor()) {
+            for (boolean ok = cursor.seek(headKey); ok; ok = cursor.next()) {
+                byte[] value = cursor.value();
+                if (value.length > 0) {
+                    CrawlURI curi = decode(value);
                     if (!curi.getClassKey().equals(queue)) {
                         // rolled into next queue; finished with this queue
                         break;
                     }
                     if (pattern.matcher(curi.toString()).matches()) {
-                        cursor.delete();
+                        // the cursor keeps its view and moves on
+                        pendingUrisDB.delete(cursor.key());
                         deletedCount++;
                     }
                 }
-                result = cursor.getNext(key, value, null);
-            }
-        } finally {
-            if (cursor != null) {
-                cursor.close();
             }
         }
 
@@ -142,37 +121,31 @@ public class BdbMultipleWorkQueues {
      * @param m          marker or null to start with first entry
      * @param maxMatches
      * @return list of matches starting from marker position
-     * @throws DatabaseException
      */
     public CompositeData getFrom(
             String m,
             int maxMatches,
             Pattern pattern,
-            boolean verbose)
-            throws DatabaseException {
+            boolean verbose) {
         int matches = 0;
         ArrayList<String> results = new ArrayList<String>(maxMatches);
 
-        DatabaseEntry key;
+        byte[] key;
         if (m == null) {
             key = getFirstKey();
         } else {
-            byte[] marker = m.getBytes(); // = FrontierJMXTypes.fromString(m);
-            key = new DatabaseEntry(marker);
+            key = m.getBytes(); // = FrontierJMXTypes.fromString(m);
         }
 
-        DatabaseEntry value = new DatabaseEntry();
-
-        Cursor cursor = null;
-        OperationStatus result = null;
+        boolean ok = false;
         Thread.interrupted();
-        try {
-            cursor = pendingUrisDB.openCursor(null, null);
-            result = cursor.getSearchKey(key, value, null);
-
-            while (matches < maxMatches && result == OperationStatus.SUCCESS) {
-                if (value.getData().length > 0) {
-                    CrawlURI curi = (CrawlURI) crawlUriBinding.entryToObject(value);
+        try (Cursor cursor = pendingUrisDB.cursor()) {
+            // an exact match, as JE's getSearchKey
+            ok = key != null && cursor.seek(key) && Arrays.equals(cursor.key(), key);
+            while (matches < maxMatches && ok) {
+                byte[] value = cursor.value();
+                if (value.length > 0) {
+                    CrawlURI curi = decode(value);
                     if (pattern.matcher(curi.toString()).matches()) {
                         if (verbose) {
                             results.add("[" + curi.getClassKey() + "] "
@@ -183,19 +156,18 @@ public class BdbMultipleWorkQueues {
                         matches++;
                     }
                 }
-                result = cursor.getNext(key, value, null);
-            }
-        } finally {
-            if (cursor != null) {
-                cursor.close();
+                ok = cursor.next();
+                if (ok) {
+                    key = cursor.key();
+                }
             }
         }
 
-        if (result != OperationStatus.SUCCESS) {
+        if (!ok) {
             // end of scan
             m = null;
         } else {
-            m = new String(key.getData()); // = FrontierJMXTypes.toString(key.getData());
+            m = new String(key); // = FrontierJMXTypes.toString(key);
         }
 
         String[] arr = results.toArray(new String[results.size()]);
@@ -212,65 +184,40 @@ public class BdbMultipleWorkQueues {
     }
 
     /**
-     * @return the key to the first item in the database
-     * @throws DatabaseException
+     * @return the key to the first item in the keyspace, or null
      */
-    protected DatabaseEntry getFirstKey() throws DatabaseException {
-        DatabaseEntry key = new DatabaseEntry();
-        DatabaseEntry value = new DatabaseEntry();
+    protected byte[] getFirstKey() {
         Thread.interrupted();
-        Cursor cursor = pendingUrisDB.openCursor(null, null);
-        OperationStatus status = cursor.getNext(key, value, null);
-        cursor.close();
-        if (status == OperationStatus.SUCCESS) {
-            return key;
+        try (Cursor cursor = pendingUrisDB.cursor()) {
+            return cursor.first() ? cursor.key() : null;
         }
-        return null;
     }
 
     /**
-     * Get the next nearest item after the given key. Relies on
+     * Get the first item after the given queue's cap, or after the given
+     * key when one is remembered from an earlier dequeue. Relies on
      * external discipline -- we'll look at the queues count of how many
      * items it has -- to avoid asking for something from a
      * range where there are no associated items --
      * otherwise could get first item of next 'queue' by mistake.
      * 
-     * <p>
-     * TODO: hold within a queue's range
-     * 
-     * @param headKey Key prefix that demarks the beginning of the range
-     *                in <code>pendingUrisDB</code> we're interested in.
-     * @return CrawlURI.
-     * @throws DatabaseException
+     * @param origin Key that demarks the beginning of the queue's range
+     *               in <code>pendingUrisDB</code>: its cap.
+     * @param after  the key of the last item dequeued from this queue, to
+     *               seek past the deleted items before it; or null to start
+     *               at the cap
+     * @return CrawlURI, with its key as holder key, or null.
      */
-    public CrawlURI get(DatabaseEntry headKey)
-            throws DatabaseException {
-        DatabaseEntry result = new DatabaseEntry();
-
-        // From Linda Lee of sleepycat:
-        // "You want to check the status returned from Cursor.getSearchKeyRange
-        // to make sure that you have OperationStatus.SUCCESS. In that case,
-        // you have found a valid data record, and result.getData()
-        // (called by internally by the binding code, in this case) will be
-        // non-null. The other possible status return is
-        // OperationStatus.NOTFOUND, in which case no data record matched
-        // the criteria. "
-        OperationStatus status = getNextNearestItem(headKey, result);
-        CrawlURI retVal = null;
-        if (status != OperationStatus.SUCCESS) {
-            LOGGER.severe("See '1219854 NPE je-2.0 "
-                    + "entryToObject...'. OperationStatus "
-                    + " was not SUCCESS: "
-                    + status
-                    + ", headKey "
-                    + BdbWorkQueue.getPrefixClassKey(headKey.getData()));
+    public CrawlURI get(byte[] origin, byte[] after) {
+        byte[][] found = getNextNearestItem(origin, after);
+        if (found == null) {
             return null;
         }
-
+        CrawlURI retVal;
         try {
-            retVal = (CrawlURI) crawlUriBinding.entryToObject(result);
+            retVal = decode(found[1]);
         } catch (ClassCastException cce) {
-            Object obj = crawlUriBinding.entryToObject(result);
+            Object obj = decode(found[1]);
             LOGGER.log(Level.SEVERE,
                     "see [#HER-1283]: deserialized " + obj.getClass()
                             + " has ClassLoader "
@@ -281,74 +228,69 @@ public class BdbMultipleWorkQueues {
             LOGGER.log(
                     Level.SEVERE,
                     "expected object missing in queue " +
-                            BdbWorkQueue.getPrefixClassKey(headKey.getData()),
+                            BdbWorkQueue.getPrefixClassKey(origin),
                     rw);
             return null;
         }
-        retVal.setHolderKey(headKey);
+        retVal.setHolderKey(found[0]);
         return retVal;
     }
 
-    protected OperationStatus getNextNearestItem(DatabaseEntry headKey,
-            DatabaseEntry result) throws DatabaseException {
-        Cursor cursor = null;
-        OperationStatus status;
+    /** The key and value of the first item past the cap or {@code after}, or null. */
+    protected byte[][] getNextNearestItem(byte[] origin, byte[] after) {
         Thread.interrupted();
-        try {
-            cursor = this.pendingUrisDB.openCursor(null, null);
-
-            // get cap; headKey at this point should always point to
-            // a queue-beginning cap entry (zero-length value)
-            status = cursor.getSearchKey(headKey, result, null);
-            if (status != OperationStatus.SUCCESS) {
-                LOGGER.severe("bdb queue cap missing: "
-                        + status.toString() + " " + new String(headKey.getData()));
-                return status;
+        try (Cursor cursor = this.pendingUrisDB.cursor()) {
+            boolean ok;
+            if (after == null) {
+                // get cap; origin should always point to
+                // a queue-beginning cap entry (zero-length value)
+                if (!cursor.seek(origin) || !Arrays.equals(cursor.key(), origin)) {
+                    LOGGER.severe("queue cap missing: " + new String(origin));
+                    return null;
+                }
+                if (cursor.value().length > 0) {
+                    LOGGER.severe("queue has nonzero size: " + cursor.value().length);
+                    return null;
+                }
+                ok = cursor.next();
+            } else {
+                ok = cursor.seek(after);
+                if (ok && Arrays.equals(cursor.key(), after)) {
+                    ok = cursor.next();
+                }
             }
-            if (result.getData().length > 0) {
-                LOGGER.severe("bdb queue has nonzero size: "
-                        + result.getData().length);
-                return OperationStatus.KEYEXIST;
+            if (!ok) {
+                LOGGER.severe("See '1219854 NPE je-2.0 entryToObject...': nothing after "
+                        + BdbWorkQueue.getPrefixClassKey(origin));
+                return null;
             }
-            // get next item (real first item of queue)
-            status = cursor.getNext(headKey, result, null);
-        } finally {
-            if (cursor != null) {
-                cursor.close();
-            }
+            return new byte[][] {cursor.key(), cursor.value()};
         }
-        return status;
     }
 
     /**
      * Put the given CrawlURI in at the appropriate place.
      * 
      * @param curi
-     * @throws DatabaseException
      */
-    public void put(CrawlURI curi, boolean overwriteIfPresent)
-            throws DatabaseException {
-        DatabaseEntry insertKey = (DatabaseEntry) curi.getHolderKey();
+    public void put(CrawlURI curi, boolean overwriteIfPresent) {
+        byte[] insertKey = (byte[]) curi.getHolderKey();
         if (insertKey == null) {
             insertKey = calculateInsertKey(curi);
             curi.setHolderKey(insertKey);
         }
-        DatabaseEntry value = new DatabaseEntry();
-        crawlUriBinding.objectToEntry(curi, value);
+        DatabaseEntry entry = new DatabaseEntry();
+        crawlUriBinding.objectToEntry(curi, entry);
+        byte[] value = Arrays.copyOfRange(entry.getData(), entry.getOffset(), entry.getOffset() + entry.getSize());
         // Output tally on avg. size if level is FINE or greater.
         if (LOGGER.isLoggable(Level.FINE)) {
             tallyAverageEntrySize(curi, value);
         }
-        OperationStatus status;
         Thread.interrupted();
         if (overwriteIfPresent) {
-            status = pendingUrisDB.put(null, insertKey, value);
-        } else {
-            status = pendingUrisDB.putNoOverwrite(null, insertKey, value);
-        }
-
-        if (status != OperationStatus.SUCCESS) {
-            LOGGER.log(Level.SEVERE, "URI enqueueing failed; " + status + " " + curi, new RuntimeException());
+            pendingUrisDB.put(insertKey, value);
+        } else if (!pendingUrisDB.putIfAbsent(insertKey, value)) {
+            LOGGER.log(Level.SEVERE, "URI enqueueing failed; key exists " + curi, new RuntimeException());
         }
     }
 
@@ -360,12 +302,12 @@ public class BdbMultipleWorkQueues {
      * Log average size of database entry.
      * 
      * @param curi  CrawlURI this entry is for.
-     * @param value Database entry value.
+     * @param value Stored value.
      */
     private synchronized void tallyAverageEntrySize(CrawlURI curi,
-            DatabaseEntry value) {
+            byte[] value) {
         entryCount++;
-        int length = value.getData().length;
+        int length = value.length;
         entrySizeSum += length;
         int avg = (int) (entrySizeSum / entryCount);
         if (entryCount % 1000 == 0) {
@@ -422,9 +364,9 @@ public class BdbMultipleWorkQueues {
      * Package access &amp; static for testing purposes.
      * 
      * @param curi
-     * @return a DatabaseEntry key for the CrawlURI
+     * @return the key for the CrawlURI
      */
-    protected static DatabaseEntry calculateInsertKey(CrawlURI curi) {
+    protected static byte[] calculateInsertKey(CrawlURI curi) {
         byte[] classKeyBytes = null;
         int len = 0;
         classKeyBytes = curi.getClassKey().getBytes(Charsets.UTF_8);
@@ -443,12 +385,11 @@ public class BdbMultipleWorkQueues {
         long precedence = Math.min(rawPrecedence, 127);
         ordinalPlus = (((precedence) & 0xFFL) << 48) | ordinalPlus;
         ArchiveUtils.longIntoByteArray(ordinalPlus, keyData, len + 1);
-        return new DatabaseEntry(keyData);
+        return keyData;
     }
 
-    protected static String insertKeyToString(DatabaseEntry holderKey) {
+    protected static String insertKeyToString(byte[] data) {
         StringBuilder result = new StringBuilder();
-        byte[] data = holderKey.getData();
         int p = findFirstZero(data);
         result.append(new String(data, 0, p));
 
@@ -481,60 +422,40 @@ public class BdbMultipleWorkQueues {
      * the key under which it was stored be available.
      * 
      * @param item
-     * @throws DatabaseException
+     * @return whether the item was there to delete
      */
-    public void delete(CrawlURI item) throws DatabaseException {
+    public boolean delete(CrawlURI item) {
         Thread.interrupted();
         if (item == null) {
             LOGGER.warning("Attempted to delete null CrawlURI from BDB; skipping.");
-            return;
+            return false;
         }
         Object keyObj = item.getHolderKey();
         if (keyObj == null) {
             LOGGER.warning("Cannot delete CrawlURI with null holderKey: " + item);
-            return;
+            return false;
         }
 
-        if (!(keyObj instanceof DatabaseEntry)) {
-            LOGGER.warning("holderKey is not a DatabaseEntry for: " + item + " (actual type: "
+        if (!(keyObj instanceof byte[])) {
+            LOGGER.warning("holderKey is not a byte[] for: " + item + " (actual type: "
                     + keyObj.getClass().getName() + ")");
-            return;
+            return false;
         }
 
-        DatabaseEntry de = (DatabaseEntry) keyObj;
-        OperationStatus status = pendingUrisDB.delete(null, de);
-
-        if (status != OperationStatus.SUCCESS) {
+        byte[] key = (byte[]) keyObj;
+        if (!pendingUrisDB.remove(key)) {
             LOGGER.warning("Failed to delete CrawlURI from BDB: " + item + "(key="
-                    + new BigInteger(de.getData()).toString(16) + ")");
+                    + new BigInteger(key).toString(16) + ")");
+            return false;
         }
+        return true;
     }
 
     /**
-     * Method used by BdbFrontier during checkpointing.
-     * <p>
-     * The backing bdbje database has been marked deferred write so we save
-     * on writes to disk. Means no guarantees disk will have what's in memory
-     * unless a sync is called (Calling sync on the bdbje Environment is not
-     * sufficient).
-     * <p>
-     * Package access only because only Frontiers of this package would ever
-     * need access.
-     * 
-     * @see <a href=
-     *      "http://www.sleepycat.com/jedocs/GettingStartedGuide/DB.html">Deferred
-     *      Write Databases</a>
+     * Does nothing: the store holding the keyspace is checkpointed and
+     * synced whole, by its BdbModule.
      */
     protected void sync() {
-        if (this.pendingUrisDB == null) {
-            return;
-        }
-        Thread.interrupted();
-        try {
-            this.pendingUrisDB.sync();
-        } catch (DatabaseException e) {
-            e.printStackTrace();
-        }
     }
 
     /**
@@ -542,56 +463,40 @@ public class BdbMultipleWorkQueues {
      *
      */
     public void close() {
-        /*
-         * try {
-         * this.pendingUrisDB.close();
-         * } catch (DatabaseException e) {
-         * e.printStackTrace();
-         * }
-         */
     }
 
     /**
-     * Add a dummy 'cap' entry at the given insertion key. Prevents
-     * 'seeks' to queue heads from holding lock on last item of
-     * 'preceding' queue. See:
-     * http://sourceforge.net/tracker/index.php?func=detail&amp;aid=1262665&amp;group_id=73833&amp;atid=539102
+     * Add a dummy 'cap' entry at the given insertion key, the origin of a
+     * queue, so that its first item is always the entry after an entry of
+     * its own.
      * 
      * @param origin key at which to insert the cap
      */
     public void addCap(byte[] origin) {
         Thread.interrupted();
-        try {
-            pendingUrisDB.put(null, new DatabaseEntry(origin),
-                    new DatabaseEntry(new byte[0]));
-        } catch (DatabaseException e) {
-            throw new RuntimeException(e);
-        }
+        pendingUrisDB.put(origin, new byte[0]);
     }
 
     /**
      * Utility method to perform action for all pending CrawlURI instances.
      * 
      * @param c Closure action to perform
-     * @throws DatabaseException
      */
-    protected void forAllPendingDo(Closure c) throws DatabaseException {
-        DatabaseEntry key = new DatabaseEntry();
-        DatabaseEntry value = new DatabaseEntry();
+    protected void forAllPendingDo(Closure c) {
         Thread.interrupted();
-        Cursor cursor = pendingUrisDB.openCursor(null, null);
-        while (cursor.getNext(key, value, null) == OperationStatus.SUCCESS) {
-            if (value.getData().length == 0) {
-                continue;
+        try (Cursor cursor = pendingUrisDB.cursor()) {
+            for (boolean ok = cursor.first(); ok; ok = cursor.next()) {
+                byte[] value = cursor.value();
+                if (value.length == 0) {
+                    continue;
+                }
+                c.execute(decode(value));
             }
-            CrawlURI item = (CrawlURI) crawlUriBinding.entryToObject(value);
-            c.execute(item);
         }
-        cursor.close();
     }
 
     /**
-     * Run through all uris in the pending uris database and write them to the
+     * Run through all uris in the pending uris keyspace and write them to the
      * writer.
      * 
      * @param writer destination writer for writting all the uris
@@ -601,21 +506,18 @@ public class BdbMultipleWorkQueues {
         if (this.pendingUrisDB == null) {
             return -6L;
         }
-        sync();
-        DatabaseEntry key = new DatabaseEntry();
-        DatabaseEntry value = new DatabaseEntry();
         long uris = 0L;
         Thread.interrupted();
-        Cursor cursor = pendingUrisDB.openCursor(null, null);
-        while (cursor.getNext(key, value, null) == OperationStatus.SUCCESS) {
-            if (value.getData().length == 0) {
-                continue;
+        try (Cursor cursor = pendingUrisDB.cursor()) {
+            for (boolean ok = cursor.first(); ok; ok = cursor.next()) {
+                byte[] value = cursor.value();
+                if (value.length == 0) {
+                    continue;
+                }
+                writer.println(decode(value).toString());
+                ++uris;
             }
-            CrawlURI item = (CrawlURI) crawlUriBinding.entryToObject(value);
-            writer.println(item.toString());
-            ++uris;
         }
-        cursor.close();
         return uris;
     }
 }

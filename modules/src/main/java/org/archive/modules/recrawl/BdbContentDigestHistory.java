@@ -28,12 +28,12 @@ import org.archive.modules.CrawlURI;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.Lifecycle;
 
+import org.archive.bdb.StoredClassCatalog;
+import org.archive.bdb.StoredSortedMap;
+
+import com.moaduda.onggi.Keyspace;
 import com.sleepycat.bind.serial.SerialBinding;
-import com.sleepycat.bind.serial.StoredClassCatalog;
 import com.sleepycat.bind.tuple.StringBinding;
-import com.sleepycat.collections.StoredSortedMap;
-import com.sleepycat.je.Database;
-import com.sleepycat.je.DatabaseException;
 
 /**
  * Bdb content digest history store. Must be a toplevel bean in
@@ -63,7 +63,7 @@ public class BdbContentDigestHistory extends AbstractContentDigestHistory implem
 
     @SuppressWarnings("rawtypes")
     protected StoredSortedMap<String, Map> store;
-    protected Database historyDb;
+    protected Keyspace historyDb;
 
     @Override
     @SuppressWarnings("rawtypes")
@@ -71,19 +71,12 @@ public class BdbContentDigestHistory extends AbstractContentDigestHistory implem
         if (isRunning()) {
             return;
         }
-        StoredSortedMap<String, Map> historyMap;
-        try {
-            StoredClassCatalog classCatalog = bdb.getClassCatalog();
-            historyDb = bdb.openDatabase(getHistoryDbName(), historyDbConfig(), true);
-            historyMap = new StoredSortedMap<String, Map>(
-                        historyDb,
-                        new StringBinding(),
-                        new SerialBinding<Map>(classCatalog, Map.class),
-                        true);
-        } catch (DatabaseException e) {
-            throw new RuntimeException(e);
-        }
-        store = historyMap;
+        StoredClassCatalog classCatalog = bdb.getClassCatalog();
+        historyDb = bdb.openDatabase(getHistoryDbName(), true);
+        store = new StoredSortedMap<String, Map>(
+                    historyDb,
+                    new StringBinding(),
+                    new SerialBinding<Map>(classCatalog, Map.class));
     }
 
     @Override
@@ -100,18 +93,6 @@ public class BdbContentDigestHistory extends AbstractContentDigestHistory implem
         historyDb = null;
     }
     
-    protected transient BdbModule.BdbConfig historyDbConfig;
-    protected BdbModule.BdbConfig historyDbConfig() {
-        if (historyDbConfig == null) {
-            historyDbConfig = new BdbModule.BdbConfig();
-            historyDbConfig.setTransactional(false);
-            historyDbConfig.setAllowCreate(true);
-            historyDbConfig.setDeferredWrite(true);
-        }
-        
-        return historyDbConfig;
-    }
-
     public void load(CrawlURI curi) {
         // make this call in all cases so that the value is initialized and
         // WARCWriterProcessor knows it should put the info in there

@@ -52,11 +52,9 @@ import org.json.JSONObject;
 import org.springframework.beans.factory.BeanNameAware;
 import org.springframework.beans.factory.annotation.Autowired;
 
-import com.sleepycat.je.Database;
-import com.sleepycat.je.DatabaseException;
 
 /**
- * A Frontier using several BerkeleyDB JE Databases to hold its record of
+ * A Frontier using several keyspaces of an Onggi store to hold its record of
  * known hosts (queues), and pending URIs. 
  *
  * @author Gordon Mohr
@@ -120,24 +118,14 @@ implements Checkpointable, BeanNameAware {
     }
     
     /**
-     * Create the single object (within which is one BDB database)
+     * Create the single object (within which is one keyspace)
      * inside which all the other queues live. 
      * 
      * @return the created BdbMultipleWorkQueues
-     * @throws DatabaseException
      */
-    protected BdbMultipleWorkQueues createMultipleWorkQueues()
-    throws DatabaseException {
-        Database db;
+    protected BdbMultipleWorkQueues createMultipleWorkQueues() {
         boolean recycle = (recoveryCheckpoint != null);
-
-        BdbModule.BdbConfig dbConfig = new BdbModule.BdbConfig();
-        dbConfig.setAllowCreate(!recycle);
-        // Make database deferred write: URLs that are added then removed 
-        // before a page-out is required need never cause disk IO.
-        db = bdb.openDatabase("pending", dbConfig, recycle);
-        
-        return new BdbMultipleWorkQueues(db, bdb.getClassCatalog());
+        return new BdbMultipleWorkQueues(bdb.openDatabase("pending", recycle));
     }
 
 
@@ -176,12 +164,8 @@ implements Checkpointable, BeanNameAware {
      */
     public CompositeData getURIsList(String marker, 
             int numberOfMatches, String pattern, final boolean verbose) {
-        try {
-            Pattern p = Pattern.compile(pattern);
-            return pendingUris.getFrom(marker, numberOfMatches, p, verbose);
-        } catch (DatabaseException e) {
-            throw new IllegalStateException(e);
-        }
+        Pattern p = Pattern.compile(pattern);
+        return pendingUris.getFrom(marker, numberOfMatches, p, verbose);
     }
     
     
@@ -227,10 +211,7 @@ implements Checkpointable, BeanNameAware {
     }
 
     public void doCheckpoint(Checkpoint checkpointInProgress) {
-        // An explicit sync on any deferred write dbs is needed to make the
-        // db recoverable. Sync'ing the environment is insufficient
-        this.pendingUris.sync();
-        // object caches will be sync()d by BdbModule
+        // the store, and its object caches, are checkpointed by BdbModule
         
         // save simple instance fields & inactive-levels summary
         JSONObject json = new JSONObject();
@@ -287,7 +268,7 @@ implements Checkpointable, BeanNameAware {
     }
     
     @Override
-    protected void initAllQueues() throws DatabaseException {
+    protected void initAllQueues() {
         boolean isRecovery = (recoveryCheckpoint != null);
         this.allQueues = bdb.getObjectCache("allqueues", isRecovery, WorkQueue.class, BdbWorkQueue.class);
         if(isRecovery) {
@@ -332,7 +313,7 @@ implements Checkpointable, BeanNameAware {
     }
 
     @Override
-    protected void initOtherQueues() throws DatabaseException {
+    protected void initOtherQueues() {
         boolean recycle = (recoveryCheckpoint != null);
         
         // tiny risk of OutOfMemoryError: if giant number of snoozed
@@ -377,9 +358,8 @@ implements Checkpointable, BeanNameAware {
      * dequeuing. Useful for understanding what was remaining in a crawl that
      * was ended early, for example at a time limit.
      * 
-     * @throws DatabaseException
      */
-    public void dumpAllPendingToLog() throws DatabaseException {
+    public void dumpAllPendingToLog() {
         Closure tolog = new Closure() {
             public void execute(Object curi) {
                 log((CrawlURI) curi);

@@ -32,15 +32,14 @@ import java.util.Map;
 import org.archive.modules.recrawl.PersistProcessor;
 import org.archive.util.ArchiveUtils;
 import org.archive.util.FileUtils;
-import org.archive.util.bdbje.EnhancedEnvironment;
 import org.archive.util.iterator.LineReadingIterator;
 
+import org.archive.bdb.StoredClassCatalog;
+import org.archive.bdb.StoredSortedMap;
+
+import com.moaduda.onggi.Store;
 import com.sleepycat.bind.serial.SerialBinding;
-import com.sleepycat.bind.serial.StoredClassCatalog;
 import com.sleepycat.bind.tuple.StringBinding;
-import com.sleepycat.collections.StoredSortedMap;
-import com.sleepycat.je.Database;
-import com.sleepycat.je.DatabaseException;
 
 
 
@@ -64,13 +63,12 @@ public class PrecedenceLoader {
      * 
      *  URI [whitespace] precedence 
      *  
-     * into a BDB-JE environment (second argument, created if necessary). 
+     * into an Onggi store (second argument, created if necessary). 
      * 
      * @param args command-line arguments
-     * @throws DatabaseException
      * @throws IOException
      */
-    public static void main(String[] args) throws DatabaseException, IOException {
+    public static void main(String[] args) throws IOException {
         if(args.length==2) {
             main2args(args);
         } else {
@@ -79,7 +77,7 @@ public class PrecedenceLoader {
             System.out.println(
                 "...where source is a file of lines 'URI precedence' ");
             System.out.println(
-                "and target is a BDB env dir (created if necessary). ");
+                "and target is a store directory (created if necessary). ");
             return;
         }
         
@@ -87,31 +85,26 @@ public class PrecedenceLoader {
 
     /**
      * Merge the precalculated precedence information in the first argument 
-     * file to the environment in the second environment (path; environment 
-     * will be created if it does not already exist). 
+     * file to the store in the second argument (path; the store will be
+     * created if it does not already exist). 
      * 
      * @param args command-line arguments
-     * @throws DatabaseException
      * @throws FileNotFoundException
      * @throws UnsupportedEncodingException
      * @throws IOException
      */
-    private static void main2args(String[] args) throws DatabaseException,
-            FileNotFoundException, UnsupportedEncodingException, IOException {
+    private static void main2args(String[] args) throws FileNotFoundException, UnsupportedEncodingException, IOException {
         File source = new File(args[0]);
         File env = new File(args[1]);
         FileUtils.ensureWriteableDirectory(env);
         
-        // setup target environment
-        EnhancedEnvironment targetEnv = PersistProcessor.setupCopyEnvironment(env);
-        StoredClassCatalog classCatalog = targetEnv.getClassCatalog();
-        Database historyDB = targetEnv.openDatabase(
-                null,
-                PersistProcessor.URI_HISTORY_DBNAME,
-                PersistProcessor.HISTORY_DB_CONFIG.toDatabaseConfig());
+        // setup target store
+        Store targetStore = PersistProcessor.setupCopyEnvironment(env);
+        StoredClassCatalog classCatalog = new StoredClassCatalog(targetStore);
         @SuppressWarnings({ "rawtypes", "unchecked" })
-        StoredSortedMap<String, Object> historyMap = new StoredSortedMap<String, Object>(historyDB,
-                new StringBinding(), new SerialBinding(classCatalog, Map.class), true);
+        StoredSortedMap<String, Object> historyMap = new StoredSortedMap<String, Object>(
+                targetStore.keyspace(PersistProcessor.URI_HISTORY_DBNAME),
+                new StringBinding(), new SerialBinding(classCatalog, Map.class));
         
         int count = 0;
         
@@ -147,13 +140,12 @@ public class PrecedenceLoader {
         } else {
             // error
             System.err.println("unacceptable source file");
+            targetStore.close();
             return;
         }
         
         // cleanup
-        historyDB.sync();
-        historyDB.close();
-        targetEnv.close();
-        System.out.println(count+" records imported from "+source+" to BDB env "+env);
+        targetStore.close();
+        System.out.println(count+" records imported from "+source+" to store "+env);
     }
 }

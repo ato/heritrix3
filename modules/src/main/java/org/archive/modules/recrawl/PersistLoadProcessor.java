@@ -29,7 +29,7 @@ import org.archive.modules.CrawlURI;
 import org.archive.spring.ConfigFile;
 import org.archive.spring.ConfigPath;
 
-import com.sleepycat.je.DatabaseException;
+import com.moaduda.onggi.StoreException;
 
 /**
  * Loads CrawlURI attributes from previous fetch from persistent storage for
@@ -48,11 +48,11 @@ public class PersistLoadProcessor extends PersistOnlineProcessor {
     // "from a previous crawl for current consultation."
 
     /**
-     * A source (either log file or BDB directory) from which to copy history
-     * information into the current store at startup. (Whenever possible, it
-     * would be better to ensure the original history DB is in its own
-     * independent BDB environment, and then copy and reuse that environment in
-     * the followup crawl(s).) Only one of {link @preloadSource} and
+     * A source (either log file or store directory) from which to copy history
+     * information into the current store at startup. A BDB JE environment is
+     * refused. (Whenever possible, it would be better to ensure the original
+     * history is in its own independent store, and then copy and reuse that
+     * store in the followup crawl(s).) Only one of {link @preloadSource} and
      * {link @preloadSourceUrl} may be specified.
      */
     protected ConfigPath preloadSource = 
@@ -69,7 +69,7 @@ public class PersistLoadProcessor extends PersistOnlineProcessor {
     /**
      * A log file source url from which to copy history information into the
      * current store at startup. (Whenever possible, it would be better to
-     * ensure the original history DB is in its own independent BDB environment,
+     * ensure the original history is in its own independent store,
      * and then copy and reuse that environment in the followup crawl(s).)
      * Only one of {@link #setPreloadSource(ConfigPath)} and {@link #setPreloadSourceUrl(String)} may be specified.
      */
@@ -124,7 +124,7 @@ public class PersistLoadProcessor extends PersistOnlineProcessor {
             }
         } catch (IOException ioe) {
             logger.log(Level.SEVERE, "Problem loading " + source + ", proceeding without deduplication. " + ioe);
-        } catch(DatabaseException de) {
+        } catch(StoreException de) {
             logger.log(Level.SEVERE, "Problem loading " + source + ", proceeding without deduplication. " + de);
         } catch(IllegalArgumentException iae) {
             logger.log(Level.SEVERE, "Problem loading " + source + ", proceeding without deduplication. " + iae);

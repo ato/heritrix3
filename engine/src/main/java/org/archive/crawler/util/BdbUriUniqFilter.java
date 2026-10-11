@@ -27,7 +27,6 @@ import java.util.logging.Logger;
 import org.archive.bdb.BdbModule;
 import org.archive.checkpointing.Checkpoint;
 import org.archive.checkpointing.Checkpointable;
-import org.archive.util.FileUtils;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.springframework.beans.factory.BeanNameAware;
@@ -37,15 +36,13 @@ import org.springframework.context.Lifecycle;
 
 import st.ata.util.FPGenerator;
 
+import com.moaduda.onggi.Cursor;
+import com.moaduda.onggi.Keyspace;
+import com.moaduda.onggi.Pool;
+import com.moaduda.onggi.Store;
+import com.moaduda.onggi.StoreException;
 import com.sleepycat.bind.tuple.LongBinding;
-import com.sleepycat.je.Cursor;
-import com.sleepycat.je.Database;
 import com.sleepycat.je.DatabaseEntry;
-import com.sleepycat.je.DatabaseException;
-import com.sleepycat.je.DatabaseNotFoundException;
-import com.sleepycat.je.Environment;
-import com.sleepycat.je.EnvironmentConfig;
-import com.sleepycat.je.OperationStatus;
 
 
 /**
@@ -74,12 +71,11 @@ implements Lifecycle, Checkpointable, BeanNameAware, DisposableBean {
         Logger.getLogger(BdbUriUniqFilter.class.getName());
 
     protected boolean createdEnvironment = false;
-    protected long lastCacheMiss = 0;
-    protected long lastCacheMissDiff = 0;
-    protected transient Database alreadySeen = null;
-    protected transient DatabaseEntry value = null;
-    static protected DatabaseEntry ZERO_LENGTH_ENTRY = 
-        new DatabaseEntry(new byte[0]);
+    /** The store and pool the standalone constructor opened, closed with this filter. */
+    protected transient Store ownStore = null;
+    protected transient Pool ownPool = null;
+    protected transient Keyspace alreadySeen = null;
+    static protected final byte[] ZERO_LENGTH_VALUE = new byte[0];
     private static final String DB_NAME = "alreadySeenUrl";
     protected AtomicLong count = new AtomicLong(0);
     private long aggregatedLookupTime = 0;
@@ -106,13 +102,7 @@ implements Lifecycle, Checkpointable, BeanNameAware, DisposableBean {
             return; 
         }
         boolean isRecovery = (recoveryCheckpoint != null);
-        try {
-            BdbModule.BdbConfig config = getDatabaseConfig();
-            config.setAllowCreate(!isRecovery);
-            initialize(bdb.openDatabase(DB_NAME, config, isRecovery));
-        } catch (DatabaseException e) {
-            throw new IllegalStateException(e);
-        }
+        initialize(bdb.openDatabase(DB_NAME, isRecovery));
         if(isRecovery) {
             JSONObject json = recoveryCheckpoint.loadJson(beanName);
             try {
@@ -160,137 +150,81 @@ implements Lifecycle, Checkpointable, BeanNameAware, DisposableBean {
      * Constructor.
      * 
      * Only used for testing; usually no-arg constructor is used, and
-     * environment provided by injected BdbModule. 
+     * store provided by injected BdbModule. 
      * 
-     * @param bdbEnv The directory that holds the bdb environment. Will
-     * make a database under here if doesn't already exit.  Otherwise
-     * reopens any existing dbs.
-     * @param cacheSizePercentage Percentage of JVM bdb allocates as
-     * its cache.  Pass -1 to get default cache size.
+     * @param bdbEnv The directory that holds the store. Will make one
+     * here if it doesn't already exist, and empties its seen set.
+     * @param cacheSizePercentage Percentage of the maximum heap the store's
+     * pool may use. Pass -1 to use the shared pool.
      * @throws IOException
      */
     public BdbUriUniqFilter(File bdbEnv, final int cacheSizePercentage)
     throws IOException {
         super();
-        FileUtils.ensureWriteableDirectory(bdbEnv);
-        EnvironmentConfig envConfig = new EnvironmentConfig();
-        envConfig.setAllowCreate(true);
         if (cacheSizePercentage > 0 && cacheSizePercentage < 100) {
-            envConfig.setCachePercent(cacheSizePercentage);
+            ownPool = Pool.create(Runtime.getRuntime().maxMemory() / 100 * cacheSizePercentage,
+                    Math.min(4, Runtime.getRuntime().availableProcessors()));
         }
         try {
-            createdEnvironment = true;
-            Environment env = new Environment(bdbEnv, envConfig);
-            BdbModule.BdbConfig config = getDatabaseConfig();
-            config.setAllowCreate(true);
-            try {
-                env.truncateDatabase(null, DB_NAME, false);
-            } catch (DatabaseNotFoundException e) {
-                // ignored
-            }
-            Database db = env.openDatabase(null, DB_NAME, config.toDatabaseConfig());
-            initialize(db);
-        } catch (DatabaseException e) {
-            IOException io = new IOException();
-            io.initCause(e);
-            throw io;
+            ownStore = BdbModule.openStore(bdbEnv,
+                    BdbModule.storeOptions(ownPool != null ? ownPool : Pool.shared()));
+        } catch (IOException | RuntimeException e) {
+            if (ownPool != null) ownPool.close();
+            throw e;
         }
+        createdEnvironment = true;
+        Keyspace db = ownStore.keyspace(DB_NAME);
+        db.truncate();
+        initialize(db);
     }
-
 
     /**
      * Method shared by constructors.
-     * @throws DatabaseException
      */
-    protected void initialize(Database db) throws DatabaseException {
+    protected void initialize(Keyspace db) {
         open(db);
     }
 
     /**
-     * @return DatabaseConfig to use
+     * Opens the already-seen set in the passed keyspace, after deserializing
+     * an instance of this class.
      */
-    protected BdbModule.BdbConfig getDatabaseConfig() {
-        BdbModule.BdbConfig dbConfig = new BdbModule.BdbConfig();
-        return dbConfig;
-    }
-    
-    /**
-     * Call after deserializing an instance of this class.  Will open the
-     * already seen in passed environment.
-     * @throws DatabaseException
-     */
-    public void reopen(Database db)
-    throws DatabaseException {
+    public void reopen(Keyspace db) {
         open(db);
     }
     
-    protected void open(final Database db)
-    throws DatabaseException {
+    protected void open(final Keyspace db) {
         this.alreadySeen = db;
-        this.value = new DatabaseEntry("".getBytes());
     }
     
     public synchronized void close() {
         logger.fine("Count of alreadyseen on close " + count.get());
-        Environment env = null;
-        if (this.alreadySeen != null) {
+        // Only close the store if it was opened by the standalone
+        // constructor; a BdbModule closes its own store.
+        if (ownStore != null) {
             try {
-                env = this.alreadySeen.getEnvironment();
-                alreadySeen.sync();
-            } catch (DatabaseException e) {
+                ownStore.close();
+            } catch (StoreException e) {
                 logger.severe(e.getMessage());
             }
+            ownStore = null;
         }
-        if (env != null) {
-            try {
-                // This sync flushes what's in RAM. Its expensive operation.
-                // Without, data can be lost. Not for transactional operation.
-                env.sync();
-            } catch (DatabaseException e) {
-                logger.severe(e.getMessage());
-            }
-        }
-        
-        if (createdEnvironment) {
-            // Only manually close database if it were created via a
-            // constructor, and not via a BdbModule. Databases created by a 
-            // BdbModule will be closed by that BdbModule.
-            if (this.alreadySeen != null) {
-                try {
-                    alreadySeen.close();
-                } catch (DatabaseException e) {
-                    logger.severe(e.getMessage());
-                }
-            }
-            if (env != null) {
-                try {
-                    env.close();
-                } catch (DatabaseException e) {
-                    logger.severe(e.getMessage());
-                }
-            }
+        if (ownPool != null) {
+            ownPool.close();
+            ownPool = null;
         }
     }
     
-    public synchronized long getCacheMisses() {
-        if(alreadySeen==null) {
-            return 0;
-        }
-        try {
-            long cacheMiss = this.alreadySeen.getEnvironment().
-            getStats(null).getNCacheMiss();
-            // FIXME: get shouldn't define intervals (should be idempotent)
-            this.lastCacheMissDiff = cacheMiss - this.lastCacheMiss;
-            this.lastCacheMiss = cacheMiss;
-            return this.lastCacheMiss;
-        } catch (DatabaseException de) {
-            return 0;
-        }
-        
+    /**
+     * Onggi does not count cache misses, so this is always 0. Kept for
+     * scripts that call it.
+     */
+    public long getCacheMisses() {
+        return 0;
     }
     
     public long getLastCacheMissDiff() {
-        return this.lastCacheMissDiff;
+        return 0;
     }
     
     /**
@@ -315,24 +249,23 @@ implements Lifecycle, Checkpointable, BeanNameAware, DisposableBean {
     }
 
     protected boolean setAdd(CharSequence uri) {
-        DatabaseEntry key = new DatabaseEntry();
-        LongBinding.longToEntry(createKey(uri), key);
+        byte[] key = keyBytes(createKey(uri));
         long started = 0;
-        
-        OperationStatus status = null;
-        try {
-            if (logger.isLoggable(Level.FINE)) {
-                started = System.currentTimeMillis();
-            }
-            status = alreadySeen.putNoOverwrite(null, key, ZERO_LENGTH_ENTRY);
-            if (logger.isLoggable(Level.FINE)) {
-                aggregatedLookupTime +=
-                    (System.currentTimeMillis() - started);
-            }
-        } catch (DatabaseException e) {
-            logger.severe(e.getMessage());
+        if (logger.isLoggable(Level.FINE)) {
+            started = System.currentTimeMillis();
         }
-        if (status == OperationStatus.SUCCESS) {
+        boolean added;
+        try {
+            added = alreadySeen.putIfAbsent(key, ZERO_LENGTH_VALUE);
+        } catch (StoreException e) {
+            logger.severe(e.getMessage());
+            return true;
+        }
+        if (logger.isLoggable(Level.FINE)) {
+            aggregatedLookupTime +=
+                (System.currentTimeMillis() - started);
+        }
+        if (added) {
             count.incrementAndGet();
             if (logger.isLoggable(Level.FINE)) {
                 final int logAt = 10000;
@@ -343,11 +276,14 @@ implements Lifecycle, Checkpointable, BeanNameAware, DisposableBean {
                 }
             }
         }
-        if(status == OperationStatus.KEYEXIST) {
-            return false; // not added
-        } else {
-            return true;
-        }
+        return added;
+    }
+
+    /** A key as LongBinding writes it. */
+    private static byte[] keyBytes(long key) {
+        DatabaseEntry entry = new DatabaseEntry();
+        LongBinding.longToEntry(key, entry);
+        return entry.getData();
     }
 
     protected long setCount() {
@@ -355,20 +291,17 @@ implements Lifecycle, Checkpointable, BeanNameAware, DisposableBean {
     }
 
     protected boolean setRemove(CharSequence uri) {
-        DatabaseEntry key = new DatabaseEntry();
-        LongBinding.longToEntry(createKey(uri), key);
-            OperationStatus status = null;
+        boolean removed;
         try {
-            status = alreadySeen.delete(null, key);
-        } catch (DatabaseException e) {
+            removed = alreadySeen.remove(keyBytes(createKey(uri)));
+        } catch (StoreException e) {
             logger.severe(e.getMessage());
+            return false;
         }
-        if (status == OperationStatus.SUCCESS) {
+        if (removed) {
             count.decrementAndGet();
-            return true; // removed
-        } else {
-            return false; // not present
         }
+        return removed;
     }
     
     public long flush() {
@@ -417,33 +350,25 @@ implements Lifecycle, Checkpointable, BeanNameAware, DisposableBean {
      *            is ignored)
      */
     public void forgetAllSchemeAuthorityMatching(String url) {
-        long schemeAuthorityKeyLong = calcSchemeAuthorityKeyBytes(url);
-        
-        DatabaseEntry key = new DatabaseEntry();
-        DatabaseEntry value = new DatabaseEntry();
-        
-        LongBinding.longToEntry(schemeAuthorityKeyLong, key);
-        byte[] schemeAuthorityKeyBytes = key.getData();
-        
-        Cursor cursor = alreadySeen.openCursor(null, null);
+        byte[] schemeAuthorityKeyBytes = keyBytes(calcSchemeAuthorityKeyBytes(url));
         long forgottenCount = 0l;
-        
-        for (OperationStatus status = cursor.getSearchKeyRange(key, value, null);
-                status == OperationStatus.SUCCESS;
-                status = cursor.getNext(key, value, null)) {
-
-            byte[] keyData = key.getData();
-            if (keyData[0] == schemeAuthorityKeyBytes[0]
-                    && keyData[1] == schemeAuthorityKeyBytes[1]
-                    && keyData[2] == schemeAuthorityKeyBytes[2]) {
-                cursor.delete();
-                forgottenCount++;
-            } else {
-                break;
+        Cursor cursor = alreadySeen.cursor();
+        try {
+            for (boolean valid = cursor.seek(schemeAuthorityKeyBytes); valid; valid = cursor.next()) {
+                byte[] keyData = cursor.key();
+                if (keyData[0] == schemeAuthorityKeyBytes[0]
+                        && keyData[1] == schemeAuthorityKeyBytes[1]
+                        && keyData[2] == schemeAuthorityKeyBytes[2]) {
+                    if (alreadySeen.remove(keyData)) {
+                        forgottenCount++;
+                    }
+                } else {
+                    break;
+                }
             }
+        } finally {
+            cursor.close();
         }
-        
-        cursor.close();
         long newCount = count.addAndGet(-forgottenCount);
         logger.info("forgot " + forgottenCount + " urls from scheme+authority of url " + url + " (leaving " + newCount + " urls from other scheme+authorities)");
     }

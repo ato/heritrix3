@@ -22,15 +22,14 @@ package org.archive.modules.recrawl;
 import java.util.Map;
 
 import org.archive.bdb.BdbModule;
+import org.archive.bdb.StoredClassCatalog;
+import org.archive.bdb.StoredSortedMap;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.Lifecycle;
 
+import com.moaduda.onggi.Keyspace;
 import com.sleepycat.bind.serial.SerialBinding;
-import com.sleepycat.bind.serial.StoredClassCatalog;
 import com.sleepycat.bind.tuple.StringBinding;
-import com.sleepycat.collections.StoredSortedMap;
-import com.sleepycat.je.Database;
-import com.sleepycat.je.DatabaseException;
 
 /**
  * Common superclass for persisting Processors which directly store/load
@@ -59,7 +58,7 @@ implements Lifecycle {
 
     @SuppressWarnings("unchecked")
     protected StoredSortedMap<String,Map> store;
-    protected Database historyDb;
+    protected Keyspace historyDb;
 
     public PersistOnlineProcessor() {
     }
@@ -67,27 +66,17 @@ implements Lifecycle {
     @SuppressWarnings("unchecked")
     public void start() {
         // TODO: share single store instance between Load and Store processors
-        // (shared context? EnhancedEnvironment?)
+        // (shared context?)
 
         if (isRunning()) {
             return;
         }
-        StoredSortedMap<String,Map> historyMap;
-        try {
-            StoredClassCatalog classCatalog = bdb.getClassCatalog();
-            BdbModule.BdbConfig dbConfig = HISTORY_DB_CONFIG;
-
-            historyDb = bdb.openDatabase(getHistoryDbName(), dbConfig, true);
-            historyMap = 
-                new StoredSortedMap<String,Map>(
-                        historyDb,
-                        new StringBinding(), 
-                        new SerialBinding<Map>(classCatalog,Map.class), 
-                        true);
-        } catch (DatabaseException e) {
-        	throw new RuntimeException(e);
-        }
-        store = historyMap;
+        StoredClassCatalog classCatalog = bdb.getClassCatalog();
+        historyDb = bdb.openDatabase(getHistoryDbName(), true);
+        store = new StoredSortedMap<String,Map>(
+                    historyDb,
+                    new StringBinding(), 
+                    new SerialBinding<Map>(classCatalog,Map.class));
     }
     
     public boolean isRunning() {

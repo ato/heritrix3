@@ -48,11 +48,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.Lifecycle;
 
 import com.google.common.net.InternetDomainName;
+import org.archive.bdb.StoredSortedMap;
+
+import com.moaduda.onggi.Keyspace;
 import com.sleepycat.bind.tuple.IntegerBinding;
 import com.sleepycat.bind.tuple.StringBinding;
-import com.sleepycat.collections.StoredSortedMap;
-import com.sleepycat.je.Database;
-import com.sleepycat.je.DatabaseException;
 
 /**
  * WHOIS Fetcher (RFC 3912). If this fetcher is enabled, Heritrix will attempt
@@ -146,7 +146,6 @@ public class FetchWhois extends Processor implements CoreAttributeConstants,
     protected static String WHOIS_SERVER_REGEX = "(?i)^\\s*(?:whois server|ReferralServer|whois)[^:]*:.*?([a-zA-Z0-9-]+\\.[a-zA-Z0-9.:-]+)/*$";
 
     protected enum UrlStatus {IN_PROGRESS, DONE};
-    private transient Database whoisDb;
     private transient StoredSortedMap<String,String> referralServers;
     private transient StoredSortedMap<String,Integer> urlProgress;
     
@@ -193,21 +192,12 @@ public class FetchWhois extends Processor implements CoreAttributeConstants,
             return;
         }
         
-        try {
-            BdbModule.BdbConfig dbConfig = new BdbModule.BdbConfig();
-            dbConfig.setTransactional(false);
-
-            boolean isRecovery = recoveryCheckpoint != null;
-            dbConfig.setAllowCreate(!isRecovery);
-            whoisDb = bdb.openDatabase("whoisKnowledge", dbConfig, isRecovery);
-
-            referralServers = new StoredSortedMap<String, String>(whoisDb,
-                    new StringBinding(), new StringBinding(), true);
-            urlProgress = new StoredSortedMap<String, Integer>(whoisDb,
-                    new StringBinding(), new IntegerBinding(), true);
-        } catch (DatabaseException e) {
-            throw new RuntimeException(e);
-        }
+        boolean isRecovery = recoveryCheckpoint != null;
+        Keyspace whoisDb = bdb.openDatabase("whoisKnowledge", isRecovery);
+        referralServers = new StoredSortedMap<String, String>(whoisDb,
+                new StringBinding(), new StringBinding());
+        urlProgress = new StoredSortedMap<String, Integer>(whoisDb,
+                new StringBinding(), new IntegerBinding());
         
         isRunning = true; 
     }

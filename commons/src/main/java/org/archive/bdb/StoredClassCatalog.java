@@ -63,7 +63,8 @@ public class StoredClassCatalog implements ClassCatalog {
     public StoredClassCatalog(Store store) {
         this.store = store;
         this.keyspace = store.keyspace(KEYSPACE);
-        if (keyspace.putIfAbsent(new byte[] {LAST_CLASS_ID}, new byte[1])) {
+        byte[] lastKey = {LAST_CLASS_ID};
+        if (keyspace.get(lastKey) == null && keyspace.putIfAbsent(lastKey, new byte[1])) {
             store.sync();
         }
     }

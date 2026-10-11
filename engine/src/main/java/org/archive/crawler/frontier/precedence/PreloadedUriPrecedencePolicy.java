@@ -28,12 +28,12 @@ import org.archive.modules.recrawl.PersistProcessor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.Lifecycle;
 
+import org.archive.bdb.StoredClassCatalog;
+import org.archive.bdb.StoredSortedMap;
+
+import com.moaduda.onggi.Keyspace;
 import com.sleepycat.bind.serial.SerialBinding;
-import com.sleepycat.bind.serial.StoredClassCatalog;
 import com.sleepycat.bind.tuple.StringBinding;
-import com.sleepycat.collections.StoredSortedMap;
-import com.sleepycat.je.Database;
-import com.sleepycat.je.DatabaseException;
 
 /**
  * UriPrecedencePolicy which assigns URIs a precedence from a value that 
@@ -67,7 +67,7 @@ implements Lifecycle {
     }
 
     protected StoredSortedMap<String, ?> store;
-    protected Database historyDb;
+    protected Keyspace historyDb;
     
     @SuppressWarnings({ "unchecked", "rawtypes" })
     public void start() {
@@ -76,17 +76,11 @@ implements Lifecycle {
         }
         store = null;
         String dbName = PersistProcessor.URI_HISTORY_DBNAME;
-        try {
-            StoredClassCatalog classCatalog = bdb.getClassCatalog();
-            BdbModule.BdbConfig dbConfig = PersistProcessor.HISTORY_DB_CONFIG;
-
-            historyDb = bdb.openDatabase(dbName, dbConfig, true);
-            SerialBinding sb = new SerialBinding(classCatalog, Map.class);
-            StoredSortedMap historyMap = new StoredSortedMap(historyDb, new StringBinding(), sb, true);
-            store = historyMap;
-        } catch (DatabaseException e) {
-            throw new RuntimeException(e);
-        }
+        StoredClassCatalog classCatalog = bdb.getClassCatalog();
+        historyDb = bdb.openDatabase(dbName, true);
+        SerialBinding sb = new SerialBinding(classCatalog, Map.class);
+        StoredSortedMap historyMap = new StoredSortedMap(historyDb, new StringBinding(), sb);
+        store = historyMap;
     }
     
     public boolean isRunning() {

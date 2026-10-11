@@ -51,6 +51,7 @@ import java.util.logging.Logger;
 import java.util.regex.Pattern;
 
 import org.apache.commons.collections.iterators.ObjectArrayIterator;
+import org.archive.bdb.StoredSortedMap;
 import org.archive.crawler.datamodel.UriUniqFilter;
 import org.archive.crawler.event.CrawlURIDispositionEvent;
 import org.archive.crawler.framework.ToeThread;
@@ -68,8 +69,6 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
 import org.springframework.context.support.AbstractApplicationContext;
 
-import com.sleepycat.collections.StoredSortedMap;
-import com.sleepycat.je.DatabaseException;
 
 /**
  * A common Frontier base using several queues to hold pending URIs. 
@@ -262,10 +261,9 @@ implements Closeable,
      * a private readObject method, to restore queues after a checkpoint.
      * 
      * @throws IOException
-     * @throws DatabaseException
      */
     protected void initInternalQueues() 
-    throws IOException, DatabaseException {
+    throws IOException {
         this.initOtherQueues();
         if (workQueueDataOnDisk()
                 && preparer.getQueueAssignmentPolicy().maximumNumberOfKeys() >= 0
@@ -281,16 +279,14 @@ implements Closeable,
     /**
      * Initialize the allQueues field in an implementation-appropriate
      * way.
-     * @throws DatabaseException
      */
-    protected abstract void initAllQueues() throws DatabaseException;
+    protected abstract void initAllQueues();
     
     /**
      * Initialize all other internal queues in an implementation-appropriate
      * way.
-     * @throws DatabaseException
      */
-    protected abstract void initOtherQueues() throws DatabaseException;
+    protected abstract void initOtherQueues();
 
     
     

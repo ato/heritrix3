@@ -33,7 +33,6 @@ import org.archive.modules.CrawlURI;
 import org.archive.net.UURI;
 import org.archive.net.UURIFactory;
 
-import com.sleepycat.je.DatabaseException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -124,7 +123,7 @@ implements UriUniqFilter.CrawlUriReceiver {
      */
     @Test
     public void testWriting()
-    throws IOException, DatabaseException {
+    throws IOException {
         long maxcount = 1000;
         // Look for a system property to override default max count.
         String key = this.getClass().getName() + ".maxcount";
@@ -137,7 +136,7 @@ implements UriUniqFilter.CrawlUriReceiver {
     }
     
     protected void runTestWriting(long max)
-    throws DatabaseException, URIException {
+    throws URIException {
         long start = System.currentTimeMillis();
         ArrayList<UURI> list = new ArrayList<UURI>(1000);
         int count = 0;

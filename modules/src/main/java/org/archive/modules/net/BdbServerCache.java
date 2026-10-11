@@ -27,7 +27,6 @@ import org.archive.modules.fetcher.DefaultServerCache;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.Lifecycle;
 
-import com.sleepycat.je.DatabaseException;
 
 /**
  * ServerCache backed by BDB big maps; the usual choice for crawls.
@@ -53,12 +52,8 @@ implements Lifecycle, Checkpointable {
         if(isRunning()) {
             return;
         }
-        try {
-            this.servers = bdb.getObjectCache("servers", isCheckpointRecovery, CrawlServer.class, CrawlServer.class);
-            this.hosts = bdb.getObjectCache("hosts", isCheckpointRecovery, CrawlHost.class, CrawlHost.class);
-        } catch (DatabaseException e) {
-            throw new IllegalStateException(e);
-        }
+        this.servers = bdb.getObjectCache("servers", isCheckpointRecovery, CrawlServer.class, CrawlServer.class);
+        this.hosts = bdb.getObjectCache("hosts", isCheckpointRecovery, CrawlHost.class, CrawlHost.class);
         isRunning = true;
     }
 
